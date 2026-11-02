@@ -1,0 +1,39 @@
+.env# --- Secrets: real keys live only in .env ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Editors and OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Docker, Terraform, logs, scratch ---
+docker/compose/*.override.yml
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.log
+tmp/
+
+# --- Node (Playwright UI tests) ---
+node_modules/
+playwright-report/
+test-results/

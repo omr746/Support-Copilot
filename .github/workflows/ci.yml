@@ -1,0 +1,30 @@
+# Minimal CI for Plan Step 0.4. Step 1.9 replaces the steps with the full pipeline
+# (ruff, mypy, import-linter, pytest, image build). Keep the job name "checks":
+# branch protection requires a check with exactly that name.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Docs check (LOG.md and docs/adr)
+        run: python3 scripts/check_docs.py
+      - name: ADR check (Status, Context, Decision, numbering)
+        run: python3 scripts/check_adrs.py
+      - name: Install test tools
+        run: python -m pip install pytest
+      - name: Unit tests (live tests are excluded)
+        run: python -m pytest tests/unit -q -m "not live"

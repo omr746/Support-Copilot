@@ -1,0 +1,6 @@
+# Force LF line endings. Files edited from Windows tools can be saved with CRLF,
+# which breaks shell scripts and Docker builds ("bad interpreter: ^M").
+* text=auto eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+ 

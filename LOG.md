@@ -1,0 +1,94 @@
+LOG.md
+Working log for Support Copilot. After every work session: what I did, what broke, how I fixed it, and any number I measured. Decision entries use the heading format ## YYYY-MM-DD · Decision: <name> and need a Reason: line. scripts/check_docs.py checks this in CI.
+
+## 2026-11-01 · Decision: Knowledge base
+Decision: the knowledge base has these parts:
+- The built-in source is the customer-service section of the WE / Telecom Egypt website (te.eg), in Arabic and English.
+- I crawl it myself, under the site's rules.
+- Users can also upload their own files and add their own websites, and those are searched together with the built-in pages.
+- The agent uses a fake orders database (seed data, created in Step 3.1).
+
+Reason: I chose the WE pages for these reasons:
+- The project is an Arabic and English customer-support assistant, and the WE pages are a real support domain.
+- The content is in both languages, so it tests Arabic retrieval, cross-language search and Egyptian-Arabic voice questions.
+- The page text belongs to the website owner, so I crawl politely and keep only a manifest in the public repository (no page text).
+- Not checked yet: the site's robots.txt and terms of use (Plan Step 0.3). If automated access is not allowed, the built-in crawl does not run and I use pages saved by hand.
+
+Consequences for later steps:
+- The crawl follows robots.txt, uses one connection with a delay, and never fetches login-protected or personal-account pages.
+- The contact address in the User-Agent comes from the environment variable CRAWL_CONTACT, never from a file in the public repository. Rules live in configs/crawl.yaml (Steps 2.0a to 2.0c).
+- Crawls make immutable snapshots. The golden set is written by me about a named snapshot, with no copied page text, and price and offer questions are marked volatile.
+- CI uses a small hand-written fixture corpus and never contacts the live site. The full golden set runs locally and nightly against the real snapshot, and user uploads never change it (Steps 2.6 to 2.10).
+- Answers that use built-in pages cite the page URL and the fetched date, say the assistant is unofficial and not affiliated with Telecom Egypt or WE, and the UI uses no WE logos (Step 2.5a).
+- Uploaded files and submitted websites are untrusted text. The injection guard (Step 3.3) must also screen retrieved chunks, not only the user message.
+- Uploaded files must never be stored on the container disk (a free Render disk is not persistent). Store extracted text and chunks in Postgres.
+- Uploads are private to the user who added them. Allowed file types, size limits and per-user quotas are decided in Step 2.1.
+- User websites go through one safe fetcher (Steps 3.12 and 3.13) and stay off in the public demo until its tests pass.
+
+## 2026-11-01 · Decision: Hosting path
+Decision: the hosting path has these parts:
+- Deploy the Docker image as a web service on Render.
+- Use Render Postgres and Render Key Value (Redis-compatible) if their free versions fit; otherwise an external free Postgres.
+
+Reason: I chose Render for these reasons:
+- No payment method is needed to start. Render's own 2026 page on free tiers says no credit card is required.
+- Its pricing page lists custom Docker containers, Postgres and Key Value with free instances.
+- The Docker image stays portable, so moving to Cloud Run later is a config change.
+
+Risks to check in Step 1.10 (not verified yet):
+- A free instance has 512 MB RAM and 0.1 CPU. The local embedder and the reranker must both fit, because the reranker stays ON in the hosted demo (see the next decision). Memory is measured, not guessed: see "Decision: Reranker in hosting".
+- Free services sleep when idle, so the first request after a pause is slow. Smoke tests (scripts/smoke.sh) need a warm-up call and a long timeout.
+- A source says free Postgres expires after 30 days. Confirm on Render's docs, and confirm that the pgvector extension is available.
+- Plan Step 1.10 shows Cloud Run commands, and Steps 7.1 and 7.3 assume Terraform, canary and rollback on Cloud Run. Rewrite them for Render when we reach those steps.
+
+## 2026-11-01 · Decision: Reranker in hosting
+Decision: the reranker has these rules:
+- The cross-encoder reranker stays enabled in the hosted demo.
+- It is never removed to save memory.
+- Reranking is a config switch on the retriever port (Step 2.4), set to enabled in prod.yaml.
+
+Reason: I keep the reranker on for these reasons:
+- Reranking is part of the retrieval quality we measure and show (recall@5 and MRR before and after, Steps 2.4 and 2.7).
+- A hosted demo without it would not match the numbers in the README.
+
+How we make it fit (to verify, nothing here is measured yet):
+- Prefer ONNX runtimes (fastembed) over a PyTorch install, because they use much less memory.
+- Questions can be Arabic while the documents are English, so the reranker must be multilingual. Multilingual rerankers are larger, so this is the likely tight spot. Check the model size and license on its model card before choosing.
+- Load models lazily, use one worker, and rerank only the top 10 to 20 candidates from the hybrid search.
+- Measure peak memory (RSS) of the container with embedder and reranker loaded, in Step 2.4 locally and again in Step 1.10 on Render.
+- If it does not fit in 512 MB, in this order: (1) a smaller or quantized reranker, if recall@5 and MRR on the golden set stay within the tolerance we set; (2) a larger Render instance type (paid, not free); (3) run the reranker as a separate service. Dropping the reranker is not an option on this list.
+
+## 2026-11-01 · Decision: UI language
+Decision: the interface has these parts:
+- Bilingual interface: Arabic (right-to-left) and English (left-to-right), with a language switch.
+- UI texts live in one translation file per language.
+
+Reason: I chose a bilingual UI for these reasons:
+- The project targets Arabic and English users (voice questions in Arabic, an English documentation set).
+- One UI that handles both avoids a rewrite later.
+
+Consequences:
+- Step 3.7 UI tests cover both directions: Arabic sets right-to-left, English sets left-to-right, and switching language keeps the conversation.
+
+## 2026-11-01 · Session 1: environment, keys, decisions, repository files
+Did:
+- Step 0.1: scripts/check_env.sh passed on WSL2 (Ubuntu).
+- Step 0.2: accounts created; scripts/check_keys_live.py passed for Groq, Gemini and Langfuse.
+- Line endings: git ls-files --eol shows eol=lf is active, so .gitattributes works.
+- Step 0.3: the three decisions above.
+- Step 0.4: LICENSE, .gitignore and a minimal CI workflow written.
+
+Broke: nothing reported so far.
+
+Numbers: none yet.
+
+## 2026-11-02 · Session 2: ADR lint
+
+Did:
+- Step 0.5: ADR lint checks completed.
+- All tests passed.
+
+Broke: no failures reported.
+
+Numbers:
+- 49 tests passed: 12 from `scripts/check_docs.py` and 37 from `scripts/check_adrs.py`.
