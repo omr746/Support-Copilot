@@ -9,7 +9,6 @@ Run:  COPILOT_RUN_LIVE=1 pytest tests/integration/test_provider_keys_live.py -m 
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 from pathlib import Path
 
@@ -28,10 +27,6 @@ def _load_script():
     return module
 
 
-@pytest.mark.skipif(
-    os.environ.get("COPILOT_RUN_LIVE") != "1",
-    reason="live test: set COPILOT_RUN_LIVE=1 to call real providers",
-)
 def test_provider_keys_exist_and_work() -> None:
     checker = _load_script()
     results = checker.run_checks()
