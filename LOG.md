@@ -102,30 +102,28 @@ Broke: no failures reported.
 Numbers:
 - 49 tests passed: 12 from `scripts/check_docs.py` and 37 from `scripts/check_adrs.py`.
 
-## 2026-11-03 · Session 3: Project skeleton (Step 1.1)
+## 2026-11-03 · Session 3: Project skeleton & CI quality suite (Step 1.1)
 
 Did:
-- Step 1.1: Created `pyproject.toml` with hatchling build backend, core dependencies, optional extras (`local-asr`, `local-tts`, `evals`), `dev` dependency group, pytest configuration with custom `live` marker, ruff, and mypy settings.
-- Created `.python-version` (3.12), `.importlinter` with architectural boundary contracts, and `Makefile` for standard workflows.
+- Step 1.1: Created `pyproject.toml` with hatchling build backend, core dependencies, optional extras (`local-asr`, `local-tts`, `evals`), `dev` dependency group, pytest configuration with custom `live` marker, and ruff/mypy settings.
+- Configured `pythonpath = ["src"]` in `pyproject.toml` so pytest properly discovers the package under the `src/` layout without requiring an editable install.
+- Created `.python-version` (3.12), `.importlinter` with architectural boundary contracts, and `Makefile` (`install`, `lint`, `format`, `typecheck`, `import-check`, `test`, `check`).
 - Created package layout `src/copilot/` with `__init__.py` for all subpackages (`core`, `llm`, `asr`, `tts`, `rag`, `agent`, `voice`, `observability`, `api`).
 - Created test structure with root `tests/conftest.py` guarding `@pytest.mark.live` tests, and `tests/unit/test_imports.py` testing subpackage imports, package version, and optional-extras isolation.
+- Expanded `.github/workflows/ci.yml` using `astral-sh/setup-uv@v5` to run all quality checks: docs check, ADR lint, ruff format check, ruff lint check, mypy typecheck, import boundary check, and pytest suite.
 
 Broke:
-- Nothing broken.
+- CI failed with `ModuleNotFoundError: No module named 'copilot'` because `src` was not in Python path in the container runner.
+- `make check` found 5 lint findings in `scripts/`: `B905` & `RUF007` (`zip` without strict/pairwise), `RUF005` (list concatenation), and `B904` (`raise ... from err`).
+- `ruff format --check` flagged 5 files needing reformatting.
+
+Fixed:
+- Added `pythonpath = ["src"]` under `[tool.pytest.ini_options]` in `pyproject.toml`.
+- Refactored `scripts/check_adrs.py` to use `itertools.pairwise()`, `scripts/check_docs.py` to unpack lists, and `scripts/check_keys_live.py` to explicitly chain exceptions with `from err`.
+- Added `per-file-ignores` in `pyproject.toml` for `scripts/*` and `tests/*` for `T20` (`print`) and `UP`.
+- Ran `make format` to auto-format all files, making `make check` pass 100%.
 
 Numbers:
-- 61 unit tests passed across the test suite (12 from `check_docs.py`, 37 from `check_adrs.py`, 12 from `test_imports.py`, plus 1 live marker test skipped as expected).
-
-## 2026-11-03 · Session 3: Project skeleton (Step 1.1)
-
-Did:
-- Step 1.1: Created `pyproject.toml` with hatchling build backend, core dependencies, optional extras (`local-asr`, `local-tts`, `evals`), `dev` dependency group, pytest configuration with custom `live` marker, ruff, and mypy settings.
-- Created `.python-version` (3.12), `.importlinter` with architectural boundary contracts, and `Makefile` for standard workflows.
-- Created package layout `src/copilot/` with `__init__.py` for all subpackages (`core`, `llm`, `asr`, `tts`, `rag`, `agent`, `voice`, `observability`, `api`).
-- Created test structure with root `tests/conftest.py` guarding `@pytest.mark.live` tests, and `tests/unit/test_imports.py` testing subpackage imports, package version, and optional-extras isolation.
-
-Broke:
-- Nothing broken.
-
-Numbers:
-- 61 unit tests passed across the test suite (12 from `check_docs.py`, 37 from `check_adrs.py`, 12 from `test_imports.py`, plus 1 live marker test skipped as expected).
+- 63 test items collected: 61 passed offline tests (12 from `check_docs.py`, 37 from `check_adrs.py`, 12 from `test_imports.py`), and 2 live tests deselected by default via `addopts = "-m 'not live'"`.
+- 10 subpackages verified importable.
+- 0 lint or format errors remaining; mypy reported 0 issues in 10 source files; all import boundary contracts passed.
