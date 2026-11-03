@@ -67,5 +67,5 @@ warn_unused_configs = true
 no_implicit_reexport = true
 
 [[tool.mypy.overrides]]
-module = ["yaml", "structlog", "openai.*"]
+module = ["yaml"]
 ignore_missing_imports = true

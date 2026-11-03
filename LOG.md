@@ -127,3 +127,32 @@ Numbers:
 - 63 test items collected: 61 passed offline tests (12 from `check_docs.py`, 37 from `check_adrs.py`, 12 from `test_imports.py`), and 2 live tests deselected by default via `addopts = "-m 'not live'"`.
 - 10 subpackages verified importable.
 - 0 lint or format errors remaining; mypy reported 0 issues in 10 source files; all import boundary contracts passed.
+
+## 2026-11-04 · Session 4: Core package (Step 1.2)
+
+Did:
+- Step 1.2: Implemented core types, exceptions, component registry, and configuration loader:
+  - `src/copilot/core/types.py`: Defined JSON recursive type aliases (`JSONScalar`, `JSONValue`, `JSONObject`, `JSONMapping`) using Python 3.12 PEP 695 `type` syntax.
+  - `src/copilot/core/errors.py`: Built shared exception hierarchy rooted at `CopilotError`: `ProviderError` (carries `provider` and `component`), `RateLimitError` (carries `retry_after` with negative validation), `ProviderTimeout`, `AuthError`, and `InvalidInputError` (inherits from `CopilotError` with `component` attribute and `.provider` alias).
+  - `src/copilot/core/registry.py`: Generic component registry `Registry[T]` using Python 3.12 generic syntax, supporting thread-safe registration, factory lookup, instantiation, duplicate prevention, empty name guards, `__contains__`, and alphabetical listing on unknown lookups.
+  - `src/copilot/core/config.py`: Implemented `AppConfig` with strict 5-tier source priority hierarchy (Explicit kwargs > OS Environment > .env > YAML file > field defaults) via a custom `_YamlSettingsSource` and thread-safe ephemeral subclassing, with production JWT secret validation.
+- Created unit test suites:
+  - `tests/unit/test_errors.py`: 7 tests covering hierarchy, attributes, aliases, and retry_after validation.
+  - `tests/unit/test_registry.py`: 9 tests covering registration, creation, duplicate errors, unknown listing, callable guards, `in` operator, and repr.
+  - `tests/unit/test_config.py`: 9 tests verifying YAML loading, environment overrides, explicit overrides, empty/malformed YAML handling, and production secret security.
+
+Broke:
+- Ruff reported `UP046` on `Generic[T]` subclassing and `UP040` on `TypeAlias` annotations in `types.py` and `registry.py`.
+- Mypy reported dynamic class variable errors when creating an ephemeral subclass in `config.py` (`ConfigWithYaml(cls)` and missing `_yaml_path` attribute).
+- Ruff flagged `I001` import sorting in the new unit test files.
+
+Fixed:
+- Migrated `types.py` and `registry.py` to native Python 3.12 PEP 695 syntax (`type` keyword and `class Registry[T]:`).
+- Declared `_yaml_path: ClassVar[Path | None] = None` and typed the base class explicitly as `AppConfig`.
+- Organized imports across all test files separating third-party from first-party imports.
+
+Numbers:
+- 88 test items collected: 86 passed offline tests (+25 new tests in Step 1.2), 2 live tests deselected.
+- Mypy: 0 issues in 14 source files.
+- Ruff: 0 lint or formatting errors across src, tests, scripts.
+- Import boundary checks: all contracts passed.
