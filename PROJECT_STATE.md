@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-03 · Delivery count: 7 (rows 1 to 7 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-04 · Delivery count: 8 (rows 1 to 8 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0 and Step 1.1 are complete. Next: Step 1.2 (Core package).
+Plan progress: Step 0, Step 1.1, and Step 1.2 are complete. Next: Step 1.3 (LLM port).
 
 ---
 
@@ -52,7 +52,7 @@ Status markers in the tree: `[ ]` planned, `[x]` done and tests passing, `[~]` d
 | MLflow | Not used. Langfuse handles experiment tracking. The model registry is `configs/models.lock.yaml` in Git |
 | Evals | Live in `evals/`, outside `src`. Thresholds in `configs/thresholds.yaml` |
 | Hosting | Decided 2026-11-01: Docker web service on Render (no payment method needed), with Render Postgres and Key Value if the free versions fit. Risks to check at Step 1.10: 512 MB RAM and 0.1 CPU on a free instance (the reranker stays on, see the next row), sleep when idle, free Postgres expiry, pgvector availability. Plan Steps 1.10, 7.1 and 7.3 are written for Cloud Run and get rewritten for Render |
-| Reranker in hosting | Decided 2026-11-01: the reranker stays ON in the hosted demo (`reranker enabled` in `prod.yaml`). Fit it with ONNX runtimes, a multilingual model (Arabic and English questions and pages), lazy loading, one worker and top 10 to 20 candidates only. Measure peak memory at Step 2.4 and again at Step 1.10. If 512 MB is not enough: smaller or quantized model, then a larger Render instance, then a separate service. Never drop it |
+| Reranker in hosting | Decided 2026-11-01: the reranker stays ON in the hosted demo (`reranker enabled` in `prod.yaml`). Fit it with ONNX runtimes, a multilingual model (Arabic and English questions and pages), lazy loading, one worker and top 10 to 20 candidates only. Measure peak memory at Step 2.4 and again at Step 1.10. If 512 MB is not enough: smaller or quantized model, then a larger Render instance type (paid, not free); (3) run the reranker as a separate service. Dropping the reranker is not an option on this list. |
 | Knowledge base | Decided 2026-11-01 (replaces the earlier FastAPI-docs choice): dynamic, three source types. Built-in: the WE / Telecom Egypt customer-service pages (starting point `https://www.te.eg/we`, exact pages to confirm), crawled by the owner, shared and read-only. User files and user-submitted websites: private to the user. The golden set and CI evals use only the built-in snapshot (CI uses a hand-written fixture corpus); user sources are never evaluated with a golden set. Not verified: Claude could not open te.eg, so `robots.txt` and the terms of use must be read by the owner at Step 2.0a first. If automated access is not allowed, use pages saved by hand. The agent uses a fake backend database (Step 3.1; PRD question Q8) |
 | UI language | Decided 2026-11-01: bilingual, Arabic (right-to-left) and English (left-to-right) with a language switch |
 | Documents | PRD and Execution Plan exist as Claude Docs. Documentation language is English |
@@ -85,7 +85,7 @@ support-copilot/
 ├── [x] README.md                         (you created it; Claude has not seen it)
 ├── [x] Makefile                          (Step 1.1)
 ├── [x] .importlinter                     (Step 1.1)
-├── [x] LOG.md                            (decisions plus sessions 1 to 3, Plan Step 0.3, 1.1)
+├── [x] LOG.md                            (decisions plus sessions 1 to 4, Plan Step 0.3, 1.1, 1.2)
 ├── [x] PROJECT_STATE.md                  (this file)
 ├── scripts/
 │   ├── [x] check_env.sh                  (Plan Step 0.1)
@@ -105,10 +105,10 @@ support-copilot/
 │   ├── [x] __init__.py                   (__version__ = "0.1.0", Step 1.1)
 │   ├── core/
 │   │   ├── [x] __init__.py               (Step 1.1 package skeleton)
-│   │   ├── [ ] types.py
-│   │   ├── [ ] errors.py
-│   │   ├── [ ] registry.py
-│   │   ├── [ ] config.py
+│   │   ├── [x] types.py                  (JSON recursive type aliases, Step 1.2)
+│   │   ├── [x] errors.py                 (CopilotError hierarchy, ProviderError, RateLimitError, Step 1.2)
+│   │   ├── [x] registry.py               (Generic component Registry[T], Step 1.2)
+│   │   ├── [x] config.py                 (AppConfig loader with 5-tier priority hierarchy, Step 1.2)
 │   │   ├── [ ] pricing.py
 │   │   └── resilience/
 │   │       ├── [ ] retry.py
@@ -171,7 +171,10 @@ support-copilot/
 │   ├── unit/
 │   │   ├── [x] test_check_docs.py        (tests for check_docs.py)
 │   │   ├── [x] test_check_adrs.py        (tests for check_adrs.py)
-│   │   └── [x] test_imports.py           (Step 1.1: subpackage imports, extras isolation, live marker guard)
+│   │   ├── [x] test_imports.py           (Step 1.1: subpackage imports, extras isolation, live marker guard)
+│   │   ├── [x] test_errors.py            (Step 1.2: exception hierarchy, provider/component attributes, retry_after)
+│   │   ├── [x] test_registry.py          (Step 1.2: generic Registry[T] validation, creation, duplicate guard)
+│   │   └── [x] test_config.py            (Step 1.2: YAML loading, env overrides, priority hierarchy, prod secret guard)
 │   └── integration/
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
 ├── docker/
@@ -185,7 +188,7 @@ support-copilot/
 │   │   └── [x] 0001-ports-and-adapters-with-provider-registry.md   (Plan Step 0.5)
 │   └── model-cards/
 └── .github/workflows/
-    ├── [x] ci.yml                        (minimal, Plan Steps 0.4 and 0.5: docs check, ADR check and unit tests; Step 1.9 makes it the full pipeline; job name stays `checks`)
+    ├── [x] ci.yml                        (Plan Step 1.1 & 1.2: format, lint, typecheck, import-linter, unit tests)
     └── eval-nightly.yml, deploy-staging.yml, deploy-prod.yml, security.yml
 ```
 
@@ -217,6 +220,7 @@ One row per delivery. Claude adds a row every time it ships files.
 | 5 | 2026-11-01 | 0.5 Write ADR-0001 (Tests line: ADR lint) | `docs/adr/0001-ports-and-adapters-with-provider-registry.md`, `scripts/check_adrs.py`, `tests/unit/test_check_adrs.py`, `.github/workflows/ci.yml` (one step added, based on the file you sent) | `check_adrs.py` is tested with 37 pytest cases: passes on the real ADR-0001, on valid ADRs with different heading levels, a trailing colon and Windows line endings, and with ignored files (`.gitkeep`, `README.md`, `TEMPLATE.md`); fails on each missing Status, Context or Decision heading, a heading that only appears inside a code fence, empty and comment-only sections, an invalid Status value, a missing, misplaced, badly formatted or wrong-number title, bad file names, a numbering gap, a duplicate number, numbering that does not start at 0001, a missing folder and a folder without ADRs; command-line exit codes 0, 1 and 2. Also checked: the Python 3.8 grammar, and that the tests fail when a rule is removed from the script (two rules tried). `ci.yml` was checked: it parses as YAML, keeps the single job `checks`, and the steps run in this order: docs check, ADR check, install test tools, unit tests. Optional check that CI turns red on a broken ADR (on a throwaway branch): not reported | `python3 scripts/check_adrs.py` and `uv run --no-project --with pytest pytest tests/unit -q -m "not live"` (expect 49 passed: 12 from `check_docs.py` plus 37 new) | yes (you reported Steps 0.4 and 0.5 finished; Session 2 in LOG.md records 49 tests passed) |
 | 6 | 2026-11-01 | Change request: dynamic knowledge base (not a numbered plan step) | `LOG.md` (Knowledge base, Reranker, Hosting and UI language entries), `.env.example` (adds `CRAWL_CONTACT` and `APP_JWT_SECRET`), `PROJECT_STATE.md`. PRD and Execution Plan were updated in place as Claude Docs: PRD goal G10, section 7.8 (FR-KB, FR-UPL, FR-WEB), and edits to NFRs, risks, milestones, open questions Q8 to Q10; plan steps 2.0a to 2.0c, 2.5a, 3.9 to 3.14 and 7.11 added, and steps 0.3, 2.1 to 2.4, 2.6 and 2.10 changed | Not applicable (documents). Each new plan step carries its own Tests line. LOG.md was checked for the heading format and a Decision and Reason line in every entry, but Claude has not seen `check_docs.py`, so please run it | `python3 scripts/check_docs.py` | yes (LOG.md passes check_docs.py, .env.example contains new keys) |
 | 7 | 2026-11-03 | 1.1 Project skeleton | `pyproject.toml`, `.python-version`, `.importlinter`, `Makefile`, `uv.lock`, `src/copilot/__init__.py` and all subpackage `__init__.py` files, `tests/conftest.py`, `tests/unit/test_imports.py` | `tests/unit/test_imports.py`: 12 unit tests passing (10 subpackage imports, package version, extras isolation), 1 live marker test skipped | `uv run pytest tests/unit/test_imports.py -v` | yes (tests verified and passed) |
+| 8 | 2026-11-04 | 1.2 Core package | `src/copilot/core/types.py`, `src/copilot/core/errors.py`, `src/copilot/core/registry.py`, `src/copilot/core/config.py`, `tests/unit/test_errors.py`, `tests/unit/test_registry.py`, `tests/unit/test_config.py`, `pyproject.toml` | 25 unit tests added: 7 in `test_errors.py`, 9 in `test_registry.py`, 9 in `test_config.py`. Proves registry duplicate guard, unknown listing, component instantiation, 5-tier config priority hierarchy, YAML + env overrides, production secret validation, shared errors, and non-negative retry_after | `make check` (or `uv run pytest tests/unit -v`) | yes (all 86 unit tests passed, mypy and ruff 0 issues) |
 
 ---
 
@@ -228,11 +232,12 @@ One row per delivery. Claude adds a row every time it ships files.
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
    - Before Step 2.0a (not before Week 1): read the te.eg `robots.txt` and terms of use and write the result in `LOG.md`. The Knowledge base entry still says "Not checked yet".
-2. **Next step: Step 1.2 (Core package)**
-   - Files: `src/copilot/core/types.py`, `src/copilot/core/errors.py`, `src/copilot/core/registry.py`, `src/copilot/core/config.py`
-   - Tests: `tests/unit/test_registry.py`, `tests/unit/test_config.py`, `tests/unit/test_errors.py`
-   - Proves: Registry duplicate check & unknown listing; Config YAML + env override; shared core errors (`ProviderError`, `RateLimitError` with `retry_after`, `ProviderTimeout`, `AuthError`, `InvalidInputError`).
-3. Steps 1.3 to 1.4: LLM port (`ChatModel` Protocol, request/response schemas, `FakeLLM`), first provider (`openai_compatible.py` for Groq), and contract test suite with mocked HTTP.
+2. **Next step: Step 1.3 (LLM port)**
+   - Port protocol: `ChatModel` Protocol in `src/copilot/llm/base.py` (`complete` method, stream handling).
+   - Schemas: frozen Pydantic models for chat messages, roles, and completions in `src/copilot/llm/schemas.py`.
+   - Fake LLM: `FakeLLM` in `tests/fakes/fake_llm.py` satisfying `ChatModel` at runtime.
+   - Tests: `tests/unit/test_llm_port.py` proving `FakeLLM` satisfies `ChatModel` Protocol at runtime, returns valid frozen responses, and rejects invalid roles.
+3. Step 1.4: First provider (`src/copilot/llm/providers/openai_compatible.py` for Groq), roles configuration in YAML, and contract test suite with mocked HTTP.
 4. Steps 1.5 to 1.9: Wrappers (`Retrying`, `Fallback`), API (`FastAPI` `/healthz`, `/readyz`, stub `/ask`), logging (`structlog`), Docker, and full CI.
 5. Step 1.10: Deploy the skeleton to Render.
 
