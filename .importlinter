@@ -1,0 +1,90 @@
+[importlinter]
+root_packages =
+    copilot
+
+[importlinter:contract:core-is-independent]
+name = core does not import from any other copilot module
+type = forbidden
+source_modules =
+    copilot.core
+forbidden_modules =
+    copilot.llm
+    copilot.asr
+    copilot.tts
+    copilot.rag
+    copilot.agent
+    copilot.voice
+    copilot.api
+    copilot.observability
+
+[importlinter:contract:observability-uses-only-core]
+name = observability only imports core
+type = forbidden
+source_modules =
+    copilot.observability
+forbidden_modules =
+    copilot.llm
+    copilot.asr
+    copilot.tts
+    copilot.rag
+    copilot.agent
+    copilot.voice
+    copilot.api
+
+[importlinter:contract:llm-forbidden]
+name = llm does not import asr tts rag agent voice api
+type = forbidden
+source_modules =
+    copilot.llm
+forbidden_modules =
+    copilot.asr
+    copilot.tts
+    copilot.rag
+    copilot.agent
+    copilot.voice
+    copilot.api
+
+[importlinter:contract:asr-forbidden]
+name = asr does not import llm tts rag agent voice api
+type = forbidden
+source_modules =
+    copilot.asr
+forbidden_modules =
+    copilot.llm
+    copilot.tts
+    copilot.rag
+    copilot.agent
+    copilot.voice
+    copilot.api
+
+[importlinter:contract:tts-forbidden]
+name = tts does not import llm asr rag agent voice api
+type = forbidden
+source_modules =
+    copilot.tts
+forbidden_modules =
+    copilot.llm
+    copilot.asr
+    copilot.rag
+    copilot.agent
+    copilot.voice
+    copilot.api
+
+[importlinter:contract:rag-forbidden]
+name = rag does not import agent voice api
+type = forbidden
+source_modules =
+    copilot.rag
+forbidden_modules =
+    copilot.agent
+    copilot.voice
+    copilot.api
+
+[importlinter:contract:agent-forbidden]
+name = agent does not import voice or api
+type = forbidden
+source_modules =
+    copilot.agent
+forbidden_modules =
+    copilot.voice
+    copilot.api
