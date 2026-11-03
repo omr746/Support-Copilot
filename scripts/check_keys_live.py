@@ -13,6 +13,7 @@ Run:   python3 scripts/check_keys_live.py
        python3 scripts/check_keys_live.py --only groq,gemini
 Exit:  0 = all checked providers OK, 1 = at least one problem.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -58,7 +59,7 @@ def parse_env(path: Path) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         if line.startswith("export "):
-            line = line[len("export "):]
+            line = line[len("export ") :]
         if "=" not in line:
             continue
         key, _, value = line.partition("=")
@@ -85,10 +86,10 @@ def http_get(url: str, headers: dict[str, str]) -> int:
             return int(response.status)
     except urllib.error.HTTPError as err:
         return int(err.code)
-    except (socket.timeout, TimeoutError):
-        raise NetworkProblem(f"timed out after {TIMEOUT_SECONDS}s")
+    except (socket.timeout, TimeoutError) as err:
+        raise NetworkProblem(f"timed out after {TIMEOUT_SECONDS}s") from err
     except urllib.error.URLError as err:
-        raise NetworkProblem(f"cannot reach the server ({type(err.reason).__name__})")
+        raise NetworkProblem(f"cannot reach the server ({type(err.reason).__name__})") from err
 
 
 def judge(status: int, rejected: tuple[int, ...], hint: str) -> tuple[bool, str]:
@@ -103,23 +104,31 @@ def judge(status: int, rejected: tuple[int, ...], hint: str) -> tuple[bool, str]
 
 # -------------------------------------------------------------------- providers
 def probe_groq(env: dict[str, str]) -> tuple[bool, str]:
-    status = http_get(GROQ_URL, {
-        "Authorization": f"Bearer {env['GROQ_API_KEY']}",
-        "Accept": "application/json",
-        "User-Agent": "support-copilot-key-check",
-    })
-    return judge(status, (401, 403),
-                 "Create a new key at console.groq.com and update GROQ_API_KEY.")
+    status = http_get(
+        GROQ_URL,
+        {
+            "Authorization": f"Bearer {env['GROQ_API_KEY']}",
+            "Accept": "application/json",
+            "User-Agent": "support-copilot-key-check",
+        },
+    )
+    return judge(
+        status, (401, 403), "Create a new key at console.groq.com and update GROQ_API_KEY."
+    )
 
 
 def probe_gemini(env: dict[str, str]) -> tuple[bool, str]:
-    status = http_get(GEMINI_URL, {
-        "x-goog-api-key": env["GEMINI_API_KEY"],
-        "Accept": "application/json",
-        "User-Agent": "support-copilot-key-check",
-    })
-    return judge(status, (400, 401, 403),
-                 "Create a new key in Google AI Studio and update GEMINI_API_KEY.")
+    status = http_get(
+        GEMINI_URL,
+        {
+            "x-goog-api-key": env["GEMINI_API_KEY"],
+            "Accept": "application/json",
+            "User-Agent": "support-copilot-key-check",
+        },
+    )
+    return judge(
+        status, (400, 401, 403), "Create a new key in Google AI Studio and update GEMINI_API_KEY."
+    )
 
 
 def probe_langfuse(env: dict[str, str]) -> tuple[bool, str]:
@@ -127,14 +136,20 @@ def probe_langfuse(env: dict[str, str]) -> tuple[bool, str]:
     if not host.startswith(("http://", "https://")):
         return False, "LANGFUSE_HOST must start with https:// (EU: https://cloud.langfuse.com)"
     pair = f"{env['LANGFUSE_PUBLIC_KEY']}:{env['LANGFUSE_SECRET_KEY']}".encode()
-    status = http_get(host + LANGFUSE_PATH, {
-        "Authorization": "Basic " + base64.b64encode(pair).decode(),
-        "Accept": "application/json",
-        "User-Agent": "support-copilot-key-check",
-    })
-    return judge(status, (401, 403),
-                 "Check the public/secret pair and that LANGFUSE_HOST matches your region "
-                 "(EU https://cloud.langfuse.com, US https://us.cloud.langfuse.com).")
+    status = http_get(
+        host + LANGFUSE_PATH,
+        {
+            "Authorization": "Basic " + base64.b64encode(pair).decode(),
+            "Accept": "application/json",
+            "User-Agent": "support-copilot-key-check",
+        },
+    )
+    return judge(
+        status,
+        (401, 403),
+        "Check the public/secret pair and that LANGFUSE_HOST matches your region "
+        "(EU https://cloud.langfuse.com, US https://us.cloud.langfuse.com).",
+    )
 
 
 @dataclass(frozen=True)
@@ -154,37 +169,52 @@ PROVIDERS: tuple[Provider, ...] = (
 # ----------------------------------------------------------------------- checks
 def check_env_file_hygiene(path: Path) -> Result:
     if not path.is_file():
-        return Result(".env file", False,
-                      f"not found at {path}. Run: cp .env.example .env  then fill in your keys.")
+        return Result(
+            ".env file",
+            False,
+            f"not found at {path}. Run: cp .env.example .env  then fill in your keys.",
+        )
     try:
-        completed = subprocess.run(["git", "check-ignore", "-q", str(path)],
-                                   cwd=REPO_ROOT, capture_output=True, timeout=10)
+        completed = subprocess.run(
+            ["git", "check-ignore", "-q", str(path)], cwd=REPO_ROOT, capture_output=True, timeout=10
+        )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return Result(".env file", True, "found (git not available, ignore check skipped)")
     if completed.returncode == 0:
         return Result(".env file", True, "found and ignored by git")
     if completed.returncode == 1:
-        return Result(".env file", False,
-                      "found, but git does NOT ignore it. Add a line `.env` to .gitignore "
-                      "before you put real keys in it.")
+        return Result(
+            ".env file",
+            False,
+            "found, but git does NOT ignore it. Add a line `.env` to .gitignore "
+            "before you put real keys in it.",
+        )
     return Result(".env file", True, "found (not inside a git repo, ignore check skipped)")
 
 
 def check_provider(provider: Provider, env: dict[str, str]) -> Result:
     missing = [k for k in provider.required if not env.get(k)]
     if missing:
-        return Result(provider.name, False,
-                      f"MISSING in .env: {', '.join(missing)}. Add it, or skip this "
-                      f"provider with --only.")
+        return Result(
+            provider.name,
+            False,
+            f"MISSING in .env: {', '.join(missing)}. Add it, or skip this provider with --only.",
+        )
     placeholders = [k for k in provider.required if is_placeholder(env[k])]
     if placeholders:
-        return Result(provider.name, False,
-                      f"{', '.join(placeholders)} still holds a placeholder value. Paste the real key.")
+        return Result(
+            provider.name,
+            False,
+            f"{', '.join(placeholders)} still holds a placeholder value. Paste the real key.",
+        )
     try:
         ok, message = provider.probe(env)
     except NetworkProblem as err:
-        return Result(provider.name, False,
-                      f"network problem: {err}. Check your internet, VPN or proxy, then retry.")
+        return Result(
+            provider.name,
+            False,
+            f"network problem: {err}. Check your internet, VPN or proxy, then retry.",
+        )
     return Result(provider.name, ok, message)
 
 
@@ -216,7 +246,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{'OK' if r.ok else 'FAIL'}] {r.name}: {r.message}")
     failed = [r for r in results if not r.ok]
     print()
-    print("All keys work." if not failed else f"{len(failed)} problem(s). Fix the [FAIL] lines and rerun.")
+    print(
+        "All keys work."
+        if not failed
+        else f"{len(failed)} problem(s). Fix the [FAIL] lines and rerun."
+    )
     return 0 if not failed else 1
 
 

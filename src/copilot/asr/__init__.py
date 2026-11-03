@@ -1,1 +1,1 @@
-"""asr — ASRProvider port, schemas, registry, factory, wrappers and providers."""
+"""asr - ASRProvider port, schemas, registry, factory, wrappers and providers."""

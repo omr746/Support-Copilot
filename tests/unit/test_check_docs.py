@@ -1,4 +1,5 @@
 """Unit tests for scripts/check_docs.py (Plan Step 0.3 Tests line)."""
+
 from __future__ import annotations
 
 import subprocess
@@ -26,8 +27,9 @@ GOOD_LOG = """# LOG.md
 
 
 def run(root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(SCRIPT), "--root", str(root)],
-                          capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(root)], capture_output=True, text=True
+    )
 
 
 def make_repo(tmp_path: Path, log: str | None = GOOD_LOG, adr: bool = True) -> Path:
@@ -85,7 +87,9 @@ def test_fails_when_reason_is_empty(tmp_path: Path) -> None:
 
 
 def test_fails_on_impossible_date(tmp_path: Path) -> None:
-    log = GOOD_LOG.replace("2026-11-01 · Decision: Hosting path", "2026-13-45 · Decision: Hosting path")
+    log = GOOD_LOG.replace(
+        "2026-11-01 · Decision: Hosting path", "2026-13-45 · Decision: Hosting path"
+    )
     result = run(make_repo(tmp_path, log=log))
     assert result.returncode == 1
     assert "invalid date" in result.stdout

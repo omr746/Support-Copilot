@@ -1,1 +1,1 @@
-"""observability — logging, tracing, metrics, health, redaction."""
+"""observability - logging, tracing, metrics, health, redaction."""

@@ -1,4 +1,5 @@
 """Unit tests for scripts/check_adrs.py (Plan Step 0.5)."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -53,11 +54,13 @@ def mentions(problems: List[str], *words: str) -> bool:
 
 # --- the real repository --------------------------------------------------
 
+
 def test_real_adr_folder_passes():
     assert problems_for(ROOT / "docs" / "adr") == []
 
 
 # --- valid cases ----------------------------------------------------------
+
 
 def test_one_valid_adr_passes(tmp_path):
     write_adr(tmp_path, 1)
@@ -93,13 +96,17 @@ def test_windows_line_endings_are_accepted(tmp_path):
     assert problems_for(tmp_path) == []
 
 
-@pytest.mark.parametrize("status", ["Accepted", "accepted", "Proposed", "Superseded by ADR-0004", "Deprecated. Replaced."])
+@pytest.mark.parametrize(
+    "status",
+    ["Accepted", "accepted", "Proposed", "Superseded by ADR-0004", "Deprecated. Replaced."],
+)
 def test_valid_status_values(tmp_path, status):
     write_adr(tmp_path, 1, status=status)
     assert problems_for(tmp_path) == []
 
 
 # --- missing headings (the Step 0.5 test line) ----------------------------
+
 
 @pytest.mark.parametrize("section", ["status", "context", "decision"])
 def test_missing_required_heading_is_reported(tmp_path, section):
@@ -130,12 +137,14 @@ def test_comment_only_section_counts_as_empty(tmp_path):
 
 # --- status value ---------------------------------------------------------
 
+
 def test_invalid_status_is_reported(tmp_path):
     write_adr(tmp_path, 1, status="Maybe later")
     assert mentions(problems_for(tmp_path), "Status", "Maybe")
 
 
 # --- title ----------------------------------------------------------------
+
 
 def test_missing_title_is_reported(tmp_path):
     (tmp_path / "0001-decision.md").write_text(
@@ -164,7 +173,10 @@ def test_title_number_must_match_file_number(tmp_path):
 
 # --- file names and numbering ---------------------------------------------
 
-@pytest.mark.parametrize("bad_name", ["adr-1.md", "1-short.md", "0002-Bad-Name.md", "0002_underscore.md", "0002-.md"])
+
+@pytest.mark.parametrize(
+    "bad_name", ["adr-1.md", "1-short.md", "0002-Bad-Name.md", "0002_underscore.md", "0002-.md"]
+)
 def test_bad_file_name_is_reported(tmp_path, bad_name):
     write_adr(tmp_path, 1)
     (tmp_path / bad_name).write_text("# x\n", encoding="utf-8")
@@ -192,6 +204,7 @@ def test_numbering_must_start_at_one(tmp_path):
 
 # --- empty or missing folder ----------------------------------------------
 
+
 def test_missing_folder_is_reported(tmp_path):
     assert mentions(problems_for(tmp_path / "nope"), "does not exist")
 
@@ -202,6 +215,7 @@ def test_folder_without_adrs_is_reported(tmp_path):
 
 
 # --- command line ---------------------------------------------------------
+
 
 def test_main_returns_zero_and_prints_count(tmp_path, capsys):
     write_adr(tmp_path, 1)

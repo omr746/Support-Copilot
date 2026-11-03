@@ -1,1 +1,1 @@
-"""core — shared types, errors, registry, config, resilience helpers."""
+"""core - shared types, errors, registry, config, resilience helpers."""
