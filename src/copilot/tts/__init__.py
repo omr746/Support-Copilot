@@ -1,1 +1,1 @@
-"""tts — TTSProvider port, schemas, registry, factory, wrappers and providers."""
+"""tts - TTSProvider port, schemas, registry, factory, wrappers and providers."""

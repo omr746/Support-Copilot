@@ -15,6 +15,7 @@ Uses only the Python standard library.
 Run:   python3 scripts/check_docs.py          (add --root PATH to check another folder)
 Exit:  0 = all good, 1 = at least one problem.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,7 +50,7 @@ def check_log(log_path: Path) -> list[str]:
     sections: dict[str, tuple[str, list[str]]] = {}
     current: tuple[str, str] | None = None
     body: list[str] = []
-    for line in lines + ["## end"]:
+    for line in [*lines, "## end"]:
         if H2_RE.match(line):
             if current is not None:
                 sections[current[1].lower()] = (current[0], body)

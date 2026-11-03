@@ -25,9 +25,11 @@ Usage:
 
 No packages to install. Works on Python 3.8 or newer.
 """
+
 from __future__ import annotations
 
 import argparse
+import itertools
 import re
 import sys
 from pathlib import Path
@@ -116,13 +118,16 @@ def check_adr_file(path: Path, number: int) -> List[str]:
             )
         elif int(match.group(1)) != number:
             problems.append(
-                "%s: the title says ADR-%s but the file name number is %04d." % (name, match.group(1), number)
+                "%s: the title says ADR-%s but the file name number is %04d."
+                % (name, match.group(1), number)
             )
 
     for section in REQUIRED_SECTIONS:
         body = sections.get(section.lower())
         if body is None:
-            problems.append("%s: missing the '%s' heading (add a line like '## %s')." % (name, section, section))
+            problems.append(
+                "%s: missing the '%s' heading (add a line like '## %s')." % (name, section, section)
+            )
         elif not has_content(body):
             problems.append("%s: the '%s' section is empty." % (name, section))
 
@@ -176,16 +181,19 @@ def check_adr_dir(adr_dir: Path) -> List[str]:
 
     for number, names in sorted(names_by_number.items()):
         if len(names) > 1:
-            problems.append("number %04d is used by more than one file: %s." % (number, ", ".join(names)))
+            problems.append(
+                "number %04d is used by more than one file: %s." % (number, ", ".join(names))
+            )
 
     numbers = sorted(names_by_number)
     if numbers[0] != 1:
         problems.append("numbering must start at 0001, but the lowest number is %04d." % numbers[0])
-    for previous, current in zip(numbers, numbers[1:]):
+    for previous, current in itertools.pairwise(numbers):
         if current != previous + 1:
             missing = ", ".join("%04d" % value for value in range(previous + 1, current))
             problems.append(
-                "numbering has a gap: %04d is followed by %04d (missing %s)." % (previous, current, missing)
+                "numbering has a gap: %04d is followed by %04d (missing %s)."
+                % (previous, current, missing)
             )
 
     for number, path in adrs:
@@ -195,7 +203,9 @@ def check_adr_dir(adr_dir: Path) -> List[str]:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Lint the ADR files in docs/adr/.")
-    parser.add_argument("--adr-dir", default=str(DEFAULT_ADR_DIR), help="folder that holds the ADR files")
+    parser.add_argument(
+        "--adr-dir", default=str(DEFAULT_ADR_DIR), help="folder that holds the ADR files"
+    )
     args = parser.parse_args(argv)
 
     adr_dir = Path(args.adr_dir)

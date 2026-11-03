@@ -1,1 +1,1 @@
-"""llm — ChatModel port, schemas, registry, factory, wrappers and providers."""
+"""llm - ChatModel port, schemas, registry, factory, wrappers and providers."""

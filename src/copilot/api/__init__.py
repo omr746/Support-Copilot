@@ -1,1 +1,1 @@
-"""api — HTTP layer and composition root (container.py)."""
+"""api - HTTP layer and composition root (container.py)."""
