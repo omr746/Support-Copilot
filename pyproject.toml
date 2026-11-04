@@ -38,7 +38,7 @@ packages = ["src/copilot"]
 
 [tool.pytest.ini_options]
 testpaths    = ["tests"]
-pythonpath   = ["src"]
+pythonpath   = [".", "src"]
 asyncio_mode = "auto"
 markers = [
     "live: calls a real provider API — never run in CI. Requires COPILOT_RUN_LIVE=1.",
@@ -58,7 +58,7 @@ ignore = ["E501"]
 "tests/*" = ["T20", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["copilot"]
+known-first-party = ["copilot", "tests"]
 
 [tool.mypy]
 python_version    = "3.12"
