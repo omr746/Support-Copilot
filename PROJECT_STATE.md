@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-04 · Delivery count: 8 (rows 1 to 8 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-04 · Delivery count: 9 (rows 1 to 9 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0, Step 1.1, and Step 1.2 are complete. Next: Step 1.3 (LLM port).
+Plan progress: Step 0, Step 1.1, Step 1.2, and Step 1.3 are complete. Next: Step 1.4 (First LLM provider: Groq / openai_compatible.py).
 
 ---
 
@@ -117,8 +117,8 @@ support-copilot/
 │   │       └── [ ] fallback.py
 │   ├── llm/
 │   │   ├── [x] __init__.py               (Step 1.1 package skeleton)
-│   │   ├── [ ] base.py
-│   │   ├── [ ] schemas.py
+│   │   ├── [x] base.py                   (ChatModel Protocol, Step 1.3)
+│   │   ├── [x] schemas.py                (Frozen request/response schemas, Step 1.3)
 │   │   ├── [ ] registry.py
 │   │   ├── [ ] factory.py
 │   │   ├── wrappers/                     retrying, fallback, cached, traced, metered
@@ -164,8 +164,11 @@ support-copilot/
 ├── data/snapshots/<id>/manifest.jsonl    (page list without text, committed, Plan Step 2.0b)
 ├── data/private/                         (page text backup, git-ignored, never committed)
 ├── tests/
+│   ├── [x] __init__.py                   (Step 1.3)
 │   ├── [x] conftest.py                   (Step 1.1, live marker guard)
-│   ├── fakes/                            FakeLLM, FakeASR, FakeTTS, FakeEmbedder
+│   ├── fakes/
+│   │   ├── [x] __init__.py               (Step 1.3)
+│   │   └── [x] fake_llm.py               (FakeLLM satisfying ChatModel Protocol, Step 1.3)
 │   ├── fixtures/corpus/                  hand-written fixture corpus for CI (never live site data)
 │   ├── contract/  redteam/
 │   ├── unit/
@@ -174,7 +177,8 @@ support-copilot/
 │   │   ├── [x] test_imports.py           (Step 1.1: subpackage imports, extras isolation, live marker guard)
 │   │   ├── [x] test_errors.py            (Step 1.2: exception hierarchy, provider/component attributes, retry_after)
 │   │   ├── [x] test_registry.py          (Step 1.2: generic Registry[T] validation, creation, duplicate guard)
-│   │   └── [x] test_config.py            (Step 1.2: YAML loading, env overrides, priority hierarchy, prod secret guard)
+│   │   ├── [x] test_config.py            (Step 1.2: YAML loading, env overrides, priority hierarchy, prod secret guard)
+│   │   └── [x] test_llm_port.py          (Step 1.3: Protocol runtime check, frozen schemas, role rejection)
 │   └── integration/
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
 ├── docker/
@@ -221,6 +225,7 @@ One row per delivery. Claude adds a row every time it ships files.
 | 6 | 2026-11-01 | Change request: dynamic knowledge base (not a numbered plan step) | `LOG.md` (Knowledge base, Reranker, Hosting and UI language entries), `.env.example` (adds `CRAWL_CONTACT` and `APP_JWT_SECRET`), `PROJECT_STATE.md`. PRD and Execution Plan were updated in place as Claude Docs: PRD goal G10, section 7.8 (FR-KB, FR-UPL, FR-WEB), and edits to NFRs, risks, milestones, open questions Q8 to Q10; plan steps 2.0a to 2.0c, 2.5a, 3.9 to 3.14 and 7.11 added, and steps 0.3, 2.1 to 2.4, 2.6 and 2.10 changed | Not applicable (documents). Each new plan step carries its own Tests line. LOG.md was checked for the heading format and a Decision and Reason line in every entry, but Claude has not seen `check_docs.py`, so please run it | `python3 scripts/check_docs.py` | yes (LOG.md passes check_docs.py, .env.example contains new keys) |
 | 7 | 2026-11-03 | 1.1 Project skeleton | `pyproject.toml`, `.python-version`, `.importlinter`, `Makefile`, `uv.lock`, `src/copilot/__init__.py` and all subpackage `__init__.py` files, `tests/conftest.py`, `tests/unit/test_imports.py` | `tests/unit/test_imports.py`: 12 unit tests passing (10 subpackage imports, package version, extras isolation), 1 live marker test skipped | `uv run pytest tests/unit/test_imports.py -v` | yes (tests verified and passed) |
 | 8 | 2026-11-04 | 1.2 Core package | `src/copilot/core/types.py`, `src/copilot/core/errors.py`, `src/copilot/core/registry.py`, `src/copilot/core/config.py`, `tests/unit/test_errors.py`, `tests/unit/test_registry.py`, `tests/unit/test_config.py`, `pyproject.toml` | 25 unit tests added: 7 in `test_errors.py`, 9 in `test_registry.py`, 9 in `test_config.py`. Proves registry duplicate guard, unknown listing, component instantiation, 5-tier config priority hierarchy, YAML + env overrides, production secret validation, shared errors, and non-negative retry_after | `make check` (or `uv run pytest tests/unit -v`) | yes (all 86 unit tests passed, mypy and ruff 0 issues) |
+| 9 | 2026-11-04 | 1.3 LLM port | `src/copilot/llm/schemas.py`, `src/copilot/llm/base.py`, `src/copilot/llm/__init__.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_port.py`, `pyproject.toml` | 6 unit tests in `test_llm_port.py`: ChatModel Protocol runtime check (`isinstance`), FakeLLM completion and call history recording, frozen schemas immutability, invalid role rejection, request boundary checks, extra fields forbidden | `make check` (or `uv run pytest tests/unit/test_llm_port.py -v`) | yes (all 92 unit tests passed, mypy and ruff 0 issues) |
 
 ---
 
@@ -232,13 +237,11 @@ One row per delivery. Claude adds a row every time it ships files.
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
    - Before Step 2.0a (not before Week 1): read the te.eg `robots.txt` and terms of use and write the result in `LOG.md`. The Knowledge base entry still says "Not checked yet".
-2. **Next step: Step 1.3 (LLM port)**
-   - Port protocol: `ChatModel` Protocol in `src/copilot/llm/base.py` (`complete` method, stream handling).
-   - Schemas: frozen Pydantic models for chat messages, roles, and completions in `src/copilot/llm/schemas.py`.
-   - Fake LLM: `FakeLLM` in `tests/fakes/fake_llm.py` satisfying `ChatModel` at runtime.
-   - Tests: `tests/unit/test_llm_port.py` proving `FakeLLM` satisfies `ChatModel` Protocol at runtime, returns valid frozen responses, and rejects invalid roles.
-3. Step 1.4: First provider (`src/copilot/llm/providers/openai_compatible.py` for Groq), roles configuration in YAML, and contract test suite with mocked HTTP.
-4. Steps 1.5 to 1.9: Wrappers (`Retrying`, `Fallback`), API (`FastAPI` `/healthz`, `/readyz`, stub `/ask`), logging (`structlog`), Docker, and full CI.
+2. **Next step: Step 1.4 (First LLM provider: Groq / openai_compatible.py)**
+   - Provider adapter: `src/copilot/llm/providers/openai_compatible.py` implementing `ChatModel` using the OpenAI-compatible SDK for Groq.
+   - Configuration: model roles mapping in YAML (`router`, `answer`, `judge`) resolving to specific model IDs.
+   - Contract test suite: `tests/contract/test_llm_contract.py` validating responses and token usage against mocked HTTP.
+3. Steps 1.5 to 1.9: Wrappers (`Retrying`, `Fallback`), API (`FastAPI` `/healthz`, `/readyz`, stub `/ask`), logging (`structlog`), Docker, and full CI.
 5. Step 1.10: Deploy the skeleton to Render.
 
 ---

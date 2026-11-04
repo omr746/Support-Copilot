@@ -156,3 +156,29 @@ Numbers:
 - Mypy: 0 issues in 14 source files.
 - Ruff: 0 lint or formatting errors across src, tests, scripts.
 - Import boundary checks: all contracts passed.
+
+## 2026-11-04 · Session 5: LLM port Protocol and schemas (Step 1.3)
+
+Did:
+- Step 1.3: Implemented the LLM port Protocol, request/response schemas, and a test fake satisfying the protocol:
+  - `src/copilot/llm/schemas.py`: Defined strictly typed, immutable models (`TokenUsage`, `ChatMessage`, `ChatRequest`, `ChatResponse`) and literal roles (`Role = Literal["system", "user", "assistant", "tool"]`, `ModelRole`, `FinishReason`). Used `ConfigDict(frozen=True, extra="forbid")` and `tuple[ChatMessage, ...]` for messages to guarantee deep immutability across async boundaries.
+  - `src/copilot/llm/base.py`: Defined `@runtime_checkable class ChatModel(Protocol)` exposing `provider_name: str` and `async def complete(request: ChatRequest) -> ChatResponse`.
+  - `src/copilot/llm/__init__.py`: Re-exported port protocol and schemas.
+  - `tests/fakes/fake_llm.py`: Implemented `FakeLLM` conforming to `ChatModel` protocol at runtime (`isinstance(fake, ChatModel)`), supporting call tracking (`calls: list[ChatRequest]`), queued responses, and default fallbacks.
+  - `tests/fakes/__init__.py`: Re-exported `FakeLLM`.
+  - `tests/unit/test_llm_port.py`: Added 6 unit tests verifying runtime protocol compliance, valid completion, call history recording, schema immutability, role rejection, request boundary checks, and rejection of extra fields.
+
+Broke:
+- Test collection failed with `ModuleNotFoundError: No module named 'tests'` during `from tests.fakes.fake_llm import FakeLLM` because pytest's `pythonpath` was restricted to `["src"]` only and `tests/__init__.py` was missing.
+
+Fixed:
+- Added `.` to `pythonpath` in `pyproject.toml` (`pythonpath = [".", "src"]`) so the repo root and `tests` package are discoverable by pytest.
+- Created `tests/__init__.py` to establish `tests` as an explicit Python package.
+- Added `"tests"` to `tool.ruff.lint.isort.known-first-party` in `pyproject.toml` to ensure clean first-party import grouping across test packages.
+
+Numbers:
+- 94 test items collected: 92 passed offline tests (+6 new tests in Step 1.3), 2 live tests deselected.
+- Mypy: strict compliance on LLM port Protocol and schemas with 0 issues.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
