@@ -19,3 +19,7 @@ class ChatModel(Protocol):
     async def complete(self, request: ChatRequest) -> ChatResponse:
         """Generate a completion for the provided chat request."""
         ...
+
+    async def aclose(self) -> None:
+        """Release underlying connections or resources."""
+        ...

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 
 import pytest
@@ -45,4 +46,5 @@ def test_optional_extras_not_leaked() -> None:
 
 @pytest.mark.live
 def test_live_marker_is_skipped_by_default() -> None:  # pragma: no cover
-    pytest.fail("A @live test ran without COPILOT_RUN_LIVE=1 — guard is broken.")
+    if os.environ.get("COPILOT_RUN_LIVE") != "1":
+        pytest.fail("A @live test ran without COPILOT_RUN_LIVE=1 — guard is broken.")

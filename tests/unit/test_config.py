@@ -91,3 +91,13 @@ def test_production_accepts_secure_jwt_secret() -> None:
 def test_invalid_type_fails_validation() -> None:
     with pytest.raises(ValidationError):
         AppConfig(langfuse_host=12345)  # type: ignore[arg-type]
+
+
+def test_real_base_yaml_loads_llm_roles() -> None:
+    base_yaml = Path("configs/base.yaml")
+    cfg = AppConfig.load(base_yaml)
+    assert cfg.llm.default_provider == "groq"
+    assert cfg.llm.roles["router"] == "openai/gpt-oss-20b"
+    assert cfg.llm.roles["answer"] == "openai/gpt-oss-120b"
+    assert cfg.llm.roles["judge"] == "openai/gpt-oss-120b"
+    assert cfg.llm.providers["groq"].base_url == "https://api.groq.com/openai/v1"
