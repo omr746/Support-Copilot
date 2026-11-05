@@ -1,0 +1,3 @@
+# configs/dev.yaml — Development configuration overrides
+environment: development
+

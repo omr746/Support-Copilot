@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-04 · Delivery count: 9 (rows 1 to 9 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-05 · Delivery count: 10 (rows 1 to 10 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0, Step 1.1, Step 1.2, and Step 1.3 are complete. Next: Step 1.4 (First LLM provider: Groq / openai_compatible.py).
+Plan progress: Step 0, Step 1.1, Step 1.2, Step 1.3, and Step 1.4 are complete. Next: Step 1.5 (LLM wrappers: Retrying and Fallback).
 
 ---
 
@@ -42,7 +42,7 @@ Status markers in the tree: `[ ]` planned, `[x]` done and tests passing, `[~]` d
 
 | Area | Decision |
 |---|---|
-| LLM | Groq primary (OpenAI-compatible client), Gemini fallback. Roles `router`, `answer`, `judge` are set in YAML. Code never names a model |
+| LLM | Groq primary (OpenAI-compatible client), Gemini fallback. Roles `router`, `answer`, `judge` are set in YAML. Code never names a model. As of August 2026, Groq deprecated `llama-3.1-8b-instant` and `llama-3.3-70b-versatile`; modern active models are `openai/gpt-oss-20b` (fast router/MoE), `openai/gpt-oss-120b` (deep reasoning answer/judge), `qwen/qwen3.8-27b` (direct bilingual chat), and `allam-2-7b` (Arabic specialist). Provider transparently maps `reasoning_content` for reasoning models |
 | ASR | Groq Whisper primary, local faster-whisper as fallback only |
 | TTS | Piper (local) as the reliable base, Groq Orpheus for quality (Saudi dialect, small free quota), edge-tts for demos only. Cache in Redis |
 | Embeddings and reranker | Local on CPU (fastembed or sentence-transformers CPU build). Both must be multilingual (Arabic, English and cross-language search); chosen and measured at Steps 2.2 and 2.4 |
@@ -92,11 +92,12 @@ support-copilot/
 │   ├── [x] check_keys_live.py            (Plan Step 0.2, live key check)
 │   ├── [x] check_docs.py                 (Plan Step 0.3, LOG.md and docs/adr check)
 │   ├── [x] check_adrs.py                 (Plan Step 0.5, ADR lint)
+│   ├── [x] test_live_models.py           (Live Groq model discovery and benchmark tool, zero-dep)
 │   └── [ ] smoke.sh                      (Plan Step 1.10)
 ├── configs/
-│   ├── [ ] base.yaml
+│   ├── [x] base.yaml                     (model roles: router, answer, judge, and Groq endpoint, Step 1.4)
 │   ├── [ ] crawl.yaml                    (built-in crawl rules, Plan Step 2.0a)
-│   ├── [ ] dev.yaml
+│   ├── [x] dev.yaml                      (development environment overrides, Step 1.4)
 │   ├── [ ] prod.yaml
 │   ├── [ ] thresholds.yaml
 │   └── [ ] models.lock.yaml
@@ -119,11 +120,12 @@ support-copilot/
 │   │   ├── [x] __init__.py               (Step 1.1 package skeleton)
 │   │   ├── [x] base.py                   (ChatModel Protocol, Step 1.3)
 │   │   ├── [x] schemas.py                (Frozen request/response schemas, Step 1.3)
-│   │   ├── [ ] registry.py
+│   │   ├── [x] registry.py               (ChatModel registry, Step 1.4)
 │   │   ├── [ ] factory.py
 │   │   ├── wrappers/                     retrying, fallback, cached, traced, metered
 │   │   └── providers/
-│   │       ├── [ ] openai_compatible.py
+│   │       ├── [x] __init__.py           (Step 1.4)
+│   │       ├── [x] openai_compatible.py  (OpenAI-compatible adapter for Groq, Step 1.4)
 │   │       └── [ ] gemini_native.py
 │   ├── asr/
 │   │   ├── [x] __init__.py               (Step 1.1 package skeleton)
@@ -170,7 +172,10 @@ support-copilot/
 │   │   ├── [x] __init__.py               (Step 1.3)
 │   │   └── [x] fake_llm.py               (FakeLLM satisfying ChatModel Protocol, Step 1.3)
 │   ├── fixtures/corpus/                  hand-written fixture corpus for CI (never live site data)
-│   ├── contract/  redteam/
+│   ├── contract/
+│   │   ├── [x] __init__.py               (Step 1.4)
+│   │   └── [x] test_llm_contract.py      (Step 1.4: mocked HTTP contract tests & manual live test)
+│   ├── redteam/
 │   ├── unit/
 │   │   ├── [x] test_check_docs.py        (tests for check_docs.py)
 │   │   ├── [x] test_check_adrs.py        (tests for check_adrs.py)
@@ -226,6 +231,7 @@ One row per delivery. Claude adds a row every time it ships files.
 | 7 | 2026-11-03 | 1.1 Project skeleton | `pyproject.toml`, `.python-version`, `.importlinter`, `Makefile`, `uv.lock`, `src/copilot/__init__.py` and all subpackage `__init__.py` files, `tests/conftest.py`, `tests/unit/test_imports.py` | `tests/unit/test_imports.py`: 12 unit tests passing (10 subpackage imports, package version, extras isolation), 1 live marker test skipped | `uv run pytest tests/unit/test_imports.py -v` | yes (tests verified and passed) |
 | 8 | 2026-11-04 | 1.2 Core package | `src/copilot/core/types.py`, `src/copilot/core/errors.py`, `src/copilot/core/registry.py`, `src/copilot/core/config.py`, `tests/unit/test_errors.py`, `tests/unit/test_registry.py`, `tests/unit/test_config.py`, `pyproject.toml` | 25 unit tests added: 7 in `test_errors.py`, 9 in `test_registry.py`, 9 in `test_config.py`. Proves registry duplicate guard, unknown listing, component instantiation, 5-tier config priority hierarchy, YAML + env overrides, production secret validation, shared errors, and non-negative retry_after | `make check` (or `uv run pytest tests/unit -v`) | yes (all 86 unit tests passed, mypy and ruff 0 issues) |
 | 9 | 2026-11-04 | 1.3 LLM port | `src/copilot/llm/schemas.py`, `src/copilot/llm/base.py`, `src/copilot/llm/__init__.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_port.py`, `pyproject.toml` | 6 unit tests in `test_llm_port.py`: ChatModel Protocol runtime check (`isinstance`), FakeLLM completion and call history recording, frozen schemas immutability, invalid role rejection, request boundary checks, extra fields forbidden | `make check` (or `uv run pytest tests/unit/test_llm_port.py -v`) | yes (all 92 unit tests passed, mypy and ruff 0 issues) |
+| 10 | 2026-11-05 | 1.4 First provider | `src/copilot/llm/providers/openai_compatible.py`, `src/copilot/llm/providers/__init__.py`, `src/copilot/llm/registry.py`, `src/copilot/core/config.py`, `src/copilot/core/errors.py`, `configs/base.yaml`, `configs/dev.yaml`, `tests/contract/__init__.py`, `tests/contract/test_llm_contract.py`, `tests/unit/test_errors.py`, `tests/unit/test_config.py` | 19 tests added: 12 mocked HTTP contract tests parametrized across registered providers (`openai_compatible`, `groq`), 4 lifecycle/isolation tests, 1 live manual Groq test (`test_live_groq_manual_call`), 2 unit tests in `test_errors.py` (numeric & HTTP-date `retry_after`), 1 unit test in `test_config.py` (YAML roles loading) | `make check` (or `uv run pytest tests/contract/test_llm_contract.py -v`) | yes (all 111 offline tests passed, 3 live tests deselected) |
 
 ---
 
@@ -237,11 +243,12 @@ One row per delivery. Claude adds a row every time it ships files.
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
    - Before Step 2.0a (not before Week 1): read the te.eg `robots.txt` and terms of use and write the result in `LOG.md`. The Knowledge base entry still says "Not checked yet".
-2. **Next step: Step 1.4 (First LLM provider: Groq / openai_compatible.py)**
-   - Provider adapter: `src/copilot/llm/providers/openai_compatible.py` implementing `ChatModel` using the OpenAI-compatible SDK for Groq.
-   - Configuration: model roles mapping in YAML (`router`, `answer`, `judge`) resolving to specific model IDs.
-   - Contract test suite: `tests/contract/test_llm_contract.py` validating responses and token usage against mocked HTTP.
-3. Steps 1.5 to 1.9: Wrappers (`Retrying`, `Fallback`), API (`FastAPI` `/healthz`, `/readyz`, stub `/ask`), logging (`structlog`), Docker, and full CI.
+2. **Next step: Step 1.5 (LLM wrappers: Retrying and Fallback)**
+   - Retrying wrapper: exponential backoff with jitter on `RateLimitError` and `ProviderTimeout`, respecting `retry_after`.
+   - Fallback wrapper: secondary provider execution on non-transient or exhausted errors (Groq -> Gemini).
+   - Contract test suite: verifying wrappers preserve the `ChatModel` Protocol and transparently retry or fall back.
+3. Steps 1.6 to 1.9: Additional wrappers (`Cached`, `Traced`, `Metered`), API (`FastAPI` `/healthz`, `/readyz`, stub `/ask`), logging (`structlog`), Docker, and full CI.
+4. Step 1.10: Deploy the skeleton to Render.
 5. Step 1.10: Deploy the skeleton to Render.
 
 ---

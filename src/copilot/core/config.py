@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import yaml
-from pydantic import model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -59,6 +59,40 @@ class _YamlSettingsSource(PydanticBaseSettingsSource):
         }
 
 
+class LLMProviderConfig(BaseModel):
+    """Configuration for an LLM provider endpoint."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    base_url: str
+    default_model: str
+    timeout: float = 30.0
+
+
+class LLMConfig(BaseModel):
+    """Configuration for LLM providers and role-to-model mapping."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    default_provider: str = "groq"
+    roles: dict[str, str] = Field(
+        default_factory=lambda: {
+            "router": "llama-3.1-8b-instant",
+            "answer": "llama-3.1-8b-instant",
+            "judge": "llama-3.1-8b-instant",
+        }
+    )
+    providers: dict[str, LLMProviderConfig] = Field(
+        default_factory=lambda: {
+            "groq": LLMProviderConfig(
+                base_url="https://api.groq.com/openai/v1",
+                default_model="llama-3.1-8b-instant",
+                timeout=30.0,
+            )
+        }
+    )
+
+
 class AppConfig(BaseSettings):
     """Core application configuration.
 
@@ -86,6 +120,9 @@ class AppConfig(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+
+    # LLM settings and role configuration
+    llm: LLMConfig = Field(default_factory=LLMConfig)
 
     # Class-level holder for custom YAML source path (ignored by Pydantic model fields)
     _yaml_path: ClassVar[Path | None] = None
@@ -127,10 +164,13 @@ class AppConfig(BaseSettings):
         **overrides: Any,
     ) -> AppConfig:
         """Load configuration from YAML and other configured sources."""
+        target_yaml = yaml_path
+        if target_yaml is None and Path("configs/base.yaml").is_file():
+            target_yaml = Path("configs/base.yaml")
 
         class ConfigWithYaml(AppConfig):
             _yaml_path: ClassVar[Path | None] = None
 
-        ConfigWithYaml._yaml_path = yaml_path
+        ConfigWithYaml._yaml_path = target_yaml
 
         return ConfigWithYaml(**overrides)

@@ -182,3 +182,39 @@ Numbers:
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
 
+## 2026-11-05 · Session 6: First LLM provider & contract suite (Step 1.4)
+
+Did:
+- Step 1.4: Implemented first LLM provider adapter, YAML roles mapping, error translation with date-aware retry_after parsing, and mocked HTTP contract tests:
+  - `src/copilot/core/errors.py`: Enhanced `RateLimitError` and implemented `_parse_retry_after` supporting numeric seconds (float/int/str) and RFC 7231 / RFC 9110 HTTP-dates (e.g. `Wed, 21 Oct 2026 07:28:00 GMT`), calculating future delta seconds or returning `0.0` for expired dates, while validating non-negativity.
+  - `src/copilot/core/config.py`: Added `LLMConfig` to `AppConfig` defining default LLM provider (`groq`), roles mapping (`router: openai/gpt-oss-20b`, `answer: openai/gpt-oss-120b`, `judge: openai/gpt-oss-120b`), and provider base URLs.
+  - `configs/base.yaml` & `configs/dev.yaml`: Created baseline configuration files with modern 2026 model roles (`openai/gpt-oss-20b` for low-latency routing, `openai/gpt-oss-120b` for deep answer synthesis, supporting `qwen/qwen3.8-27b` and `allam-2-7b`) and Groq endpoint.
+  - `src/copilot/llm/registry.py`: Defined `llm_registry: Registry[ChatModel]` for component registration and lookup.
+  - `src/copilot/llm/providers/openai_compatible.py`: Built `OpenAICompatibleChatModel` translating `ChatRequest` to OpenAI SDK completions, parsing token usage, and translating SDK/HTTP errors into core errors: `openai.RateLimitError` / 429 into `RateLimitError` with parsed `retry_after`, `openai.APITimeoutError` into `ProviderTimeout`, `openai.AuthenticationError` / 401 into `AuthError`, and response validation / bad request / malformed body into `ProviderError`. Registered under `"openai_compatible"` and `"groq"`. Implemented explicit resource lifecycle `aclose()` respecting external client ownership (`_owns_http_client`), and factory method `from_config` guaranteeing uniform provider settings. Added fallback mapping for reasoning/thinking models where final answer might be enclosed in `reasoning_content`.
+  - `src/copilot/llm/base.py`: Added `aclose()` method to `ChatModel` Protocol to standardize lifecycle cleanup across providers.
+  - `src/copilot/llm/providers/__init__.py`: Re-exported `OpenAICompatibleChatModel`.
+  - `src/copilot/llm/__init__.py`: Exported `llm_registry` and `OpenAICompatibleChatModel`.
+  - `tests/contract/__init__.py` & `tests/contract/test_llm_contract.py`: Implemented contract test suite parametrized across all registered providers (`llm_registry.registered_names()`) using offline `httpx.MockTransport` covering success, 429 numeric retry-after, 429 date retry-after, timeout, 401 auth error, and malformed body. Added tests for client ownership, developer bug isolation in mapping, config instantiation, and live-marked test `test_live_groq_manual_call` for real API call verification.
+  - `scripts/test_live_models.py`: Created zero-dependency live test and discovery script querying `/models` and benchmarking candidate models (`openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, `allam-2-7b`) with latency and token metrics.
+  - `tests/unit/test_errors.py`: Added 2 unit tests for numeric string and HTTP-date `retry_after` parsing.
+  - `tests/unit/test_config.py`: Added 1 unit test verifying `configs/base.yaml` role and provider loading.
+
+Broke:
+- No test failures. Offline `httpx.MockTransport` ensures zero external requests during unit and contract runs.
+
+Fixed:
+- Identified that Groq shut down `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` on August 16, 2026 (returning HTTP 404). Migrated role mappings and candidate pools to current 2026 models: `openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, and `allam-2-7b`.
+- Handled reasoning model token mechanics: reasoning models (e.g. `openai/gpt-oss-20b`) generate chain-of-thought tokens in `reasoning_content` before populating visible `content`. When `max_tokens` was constrained to 10 or 40, token limits were exhausted during thinking (`finish_reason="length"`), yielding empty `content`. Resolved by updating `_map_response` to fallback to `reasoning_content` if `content` is empty, and increasing test token budgets to accommodate reasoning tokens.
+- Ensured HTTP-date strings in `retry-after` header are parsed via `email.utils.parsedate_to_datetime` and converted to delta seconds rather than raising `ValueError`.
+- Separated API call execution from `_map_response` in `complete()` and narrowed error mapping to `(openai.APIError, httpx.HTTPError)`, preventing internal Python code bugs (e.g. `AttributeError`, `TypeError`) from being masked as `ProviderError`.
+- Added `_owns_http_client` check in `aclose()` to ensure shared external HTTP clients are never closed by an individual provider instance.
+- Unified provider configuration via `LLMProviderConfig` and `from_config()`, eliminating hardcoded defaults and ensuring `response.provider` consistently reflects the requested provider.
+- Resolved Mypy type-checking conflict with OpenAI's generated `httpx2.AsyncClient` binding by typing `http_client: httpx.AsyncClient | Any = None` and passing `cast(Any, http_client)` to `AsyncOpenAI`.
+
+Numbers:
+- 114 test items collected: 111 passed offline tests (+19 new offline tests: 12 contract tests across 2 registered providers, 4 lifecycle/isolation tests, +2 in test_errors, +1 in test_config), 3 live tests deselected by default.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
+

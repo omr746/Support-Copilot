@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import email.utils
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from copilot.core.errors import (
@@ -65,3 +68,23 @@ def test_rate_limit_error_carries_retry_after() -> None:
 def test_rate_limit_error_rejects_negative_retry_after() -> None:
     with pytest.raises(ValueError, match="retry_after cannot be negative"):
         RateLimitError("Quota exceeded", provider="groq", retry_after=-5.0)
+
+
+def test_rate_limit_error_accepts_numeric_string_retry_after() -> None:
+    err = RateLimitError("Quota exceeded", provider="groq", retry_after="45.5")
+    assert err.retry_after == 45.5
+    assert err.raw_retry_after == "45.5"
+
+    with pytest.raises(ValueError, match="retry_after cannot be negative"):
+        RateLimitError("Quota exceeded", provider="groq", retry_after="-10")
+
+
+def test_rate_limit_error_accepts_http_date_string_retry_after() -> None:
+    future_dt = datetime.now(timezone.utc) + timedelta(seconds=60)
+    date_str = email.utils.format_datetime(future_dt, usegmt=True)
+
+    err = RateLimitError("Quota exceeded", provider="groq", retry_after=date_str)
+    assert err.provider == "groq"
+    assert err.raw_retry_after == date_str
+    assert err.retry_after is not None
+    assert 50.0 <= err.retry_after <= 70.0

@@ -40,3 +40,6 @@ class FakeLLM:
             ),
             finish_reason="stop",
         )
+
+    async def aclose(self) -> None:
+        """No-op cleanup for deterministic FakeLLM."""

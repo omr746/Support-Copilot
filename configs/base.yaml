@@ -1,0 +1,16 @@
+# configs/base.yaml — Shared baseline configuration for Support Copilot
+environment: development
+app_jwt_secret: dev-secret-change-in-prod
+crawl_contact: ""
+
+# LLM role-to-model mapping and provider configurations
+llm:
+  default_provider: groq
+  roles:
+    router: openai/gpt-oss-20b
+    answer: openai/gpt-oss-120b
+    judge: openai/gpt-oss-120b
+  providers:
+    groq:
+      base_url: https://api.groq.com/openai/v1
+      default_model: openai/gpt-oss-20b
