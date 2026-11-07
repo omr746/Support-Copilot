@@ -8,6 +8,7 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
+import openai
 import pytest
 
 # Ensure providers are loaded into the registry
@@ -23,6 +24,7 @@ from copilot.llm.base import ChatModel
 from copilot.llm.providers.openai_compatible import OpenAICompatibleChatModel
 from copilot.llm.registry import llm_registry
 from copilot.llm.schemas import ChatMessage, ChatRequest, ChatResponse
+from copilot.llm.wrappers import FallbackChatModel
 
 REGISTERED_PROVIDERS = llm_registry.registered_names()
 
@@ -305,12 +307,17 @@ async def test_code_bugs_in_mapping_are_not_masked_as_provider_error() -> None:
 def test_from_config_resolves_all_parameters_consistently() -> None:
     config = AppConfig(
         groq_api_key="gsk_custom_test_key_123",
+        gemini_api_key="gemini_custom_test_key_456",
     )
-    model = OpenAICompatibleChatModel.from_config(config, "groq")
+    groq_model = OpenAICompatibleChatModel.from_config(config, "groq")
+    assert groq_model.provider_name == "groq"
+    assert groq_model.base_url == "https://api.groq.com/openai/v1"
+    assert groq_model.default_model == "openai/gpt-oss-20b"
 
-    assert model.provider_name == "groq"
-    assert model.base_url == "https://api.groq.com/openai/v1"
-    assert model.default_model == "llama-3.1-8b-instant"
+    gemini_model = OpenAICompatibleChatModel.from_config(config, "gemini")
+    assert gemini_model.provider_name == "gemini"
+    assert gemini_model.base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+    assert gemini_model.default_model == "gemini-3.1-flash-lite"
 
 
 @pytest.mark.live
@@ -368,3 +375,83 @@ async def test_live_groq_manual_call() -> None:
         assert response.usage.total_tokens > 0 or response.usage.prompt_tokens > 0
     finally:
         await model.aclose()
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_live_gemini_manual_call() -> None:
+    """Manual live verification call against Gemini API. Requires COPILOT_RUN_LIVE=1."""
+    config = AppConfig.load()
+    if not config.gemini_api_key or config.gemini_api_key.startswith("your_"):
+        pytest.skip("Valid GEMINI_API_KEY required in .env for live test.")
+
+    model = OpenAICompatibleChatModel.from_config(config, "gemini")
+    try:
+        last_err: Exception | None = None
+        for candidate_model in (
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+        ):
+            try:
+                req = ChatRequest(
+                    messages=(ChatMessage(role="user", content="Ping"),),
+                    model=candidate_model,
+                    temperature=0.0,
+                    max_tokens=100,
+                )
+                response = await model.complete(req)
+                assert isinstance(response, ChatResponse)
+                assert len(response.content.strip()) > 0 or response.usage.total_tokens > 0
+                assert response.provider == "gemini"
+                break
+            except (ProviderError, openai.APIError) as exc:
+                last_err = exc
+        else:
+            if last_err:
+                raise last_err
+    finally:
+        await model.aclose()
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_live_fallback_groq_to_gemini_chain() -> None:
+    """Manual live verification of fallback chain (Groq fail -> Gemini answer). Requires COPILOT_RUN_LIVE=1."""
+    config = AppConfig.load()
+    if not config.gemini_api_key or config.gemini_api_key.startswith("your_"):
+        pytest.skip("Valid GEMINI_API_KEY required in .env for live test.")
+
+    groq_model = OpenAICompatibleChatModel.from_config(config, "groq")
+    groq_model.default_model = "non-existent-model-to-trigger-fallback"
+    gemini_model = OpenAICompatibleChatModel.from_config(config, "gemini")
+
+    fallback_chain = FallbackChatModel([groq_model, gemini_model])
+    try:
+        last_err: Exception | None = None
+        for candidate_model in (
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
+        ):
+            try:
+                gemini_model.default_model = candidate_model
+                req = ChatRequest(
+                    messages=(ChatMessage(role="user", content="Ping"),),
+                    temperature=0.0,
+                    max_tokens=100,
+                )
+                response = await fallback_chain.complete(req)
+                assert isinstance(response, ChatResponse)
+                assert response.provider == "gemini"
+                assert len(response.content.strip()) > 0 or response.usage.total_tokens > 0
+                break
+            except (ProviderError, openai.APIError) as exc:
+                last_err = exc
+        else:
+            if last_err:
+                raise last_err
+    finally:
+        await fallback_chain.aclose()

@@ -134,9 +134,16 @@ class OpenAICompatibleChatModel(ChatModel):
         choice = raw.choices[0]
         content = choice.message.content or ""
         if not content:
-            # Handle reasoning/thinking models where output might reside in reasoning_content
-            reasoning = getattr(choice.message, "reasoning_content", None) or getattr(
-                choice.message, "reasoning", None
+            # Handle reasoning/thinking models where output might reside in reasoning_content or thought
+            msg = choice.message
+            extra = getattr(msg, "model_extra", None) or {}
+            reasoning = (
+                getattr(msg, "reasoning_content", None)
+                or getattr(msg, "reasoning", None)
+                or getattr(msg, "thought", None)
+                or (extra.get("reasoning_content") if isinstance(extra, dict) else None)
+                or (extra.get("reasoning") if isinstance(extra, dict) else None)
+                or (extra.get("thought") if isinstance(extra, dict) else None)
             )
             if reasoning and isinstance(reasoning, str):
                 content = reasoning
@@ -219,3 +226,4 @@ class OpenAICompatibleChatModel(ChatModel):
 # Register in the global LLM registry under canonical names
 llm_registry.register("openai_compatible", OpenAICompatibleChatModel)
 llm_registry.register("groq", OpenAICompatibleChatModel)
+llm_registry.register("gemini", OpenAICompatibleChatModel)

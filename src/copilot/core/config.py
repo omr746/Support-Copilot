@@ -77,18 +77,23 @@ class LLMConfig(BaseModel):
     default_provider: str = "groq"
     roles: dict[str, str] = Field(
         default_factory=lambda: {
-            "router": "llama-3.1-8b-instant",
-            "answer": "llama-3.1-8b-instant",
-            "judge": "llama-3.1-8b-instant",
+            "router": "openai/gpt-oss-20b",
+            "answer": "openai/gpt-oss-120b",
+            "judge": "openai/gpt-oss-120b",
         }
     )
     providers: dict[str, LLMProviderConfig] = Field(
         default_factory=lambda: {
             "groq": LLMProviderConfig(
                 base_url="https://api.groq.com/openai/v1",
-                default_model="llama-3.1-8b-instant",
+                default_model="openai/gpt-oss-20b",
                 timeout=30.0,
-            )
+            ),
+            "gemini": LLMProviderConfig(
+                base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+                default_model="gemini-3.1-flash-lite",
+                timeout=30.0,
+            ),
         }
     )
 
