@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-05 · Delivery count: 10 (rows 1 to 10 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-06 · Delivery count: 11 (rows 1 to 11 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0, Step 1.1, Step 1.2, Step 1.3, and Step 1.4 are complete. Next: Step 1.5 (LLM wrappers: Retrying and Fallback).
+Plan progress: Step 0, Step 1.1, Step 1.2, Step 1.3, Step 1.4, and Step 1.5 are complete. Next: Step 1.6 (LLM wrappers: Cached, Traced, Metered, and factory).
 
 ---
 
@@ -42,7 +42,7 @@ Status markers in the tree: `[ ]` planned, `[x]` done and tests passing, `[~]` d
 
 | Area | Decision |
 |---|---|
-| LLM | Groq primary (OpenAI-compatible client), Gemini fallback. Roles `router`, `answer`, `judge` are set in YAML. Code never names a model. As of August 2026, Groq deprecated `llama-3.1-8b-instant` and `llama-3.3-70b-versatile`; modern active models are `openai/gpt-oss-20b` (fast router/MoE), `openai/gpt-oss-120b` (deep reasoning answer/judge), `qwen/qwen3.8-27b` (direct bilingual chat), and `allam-2-7b` (Arabic specialist). Provider transparently maps `reasoning_content` for reasoning models |
+| LLM | Groq primary (OpenAI-compatible client), Gemini fallback. Roles `router`, `answer`, `judge` are set in YAML. Code never names a model. As of August 2026, Groq deprecated `llama-3.1-8b-instant` and `llama-3.3-70b-versatile`; modern active models are `openai/gpt-oss-20b` (fast router/MoE), `openai/gpt-oss-120b` (deep reasoning answer/judge), `qwen/qwen3.8-27b` (direct bilingual chat), and `allam-2-7b` (Arabic specialist). Gemini uses `gemini-3.1-flash-lite` (low-latency 1.4s, 500 RPD free quota). Provider transparently maps `reasoning_content` for reasoning models |
 | ASR | Groq Whisper primary, local faster-whisper as fallback only |
 | TTS | Piper (local) as the reliable base, Groq Orpheus for quality (Saudi dialect, small free quota), edge-tts for demos only. Cache in Redis |
 | Embeddings and reranker | Local on CPU (fastembed or sentence-transformers CPU build). Both must be multilingual (Arabic, English and cross-language search); chosen and measured at Steps 2.2 and 2.4 |
@@ -112,7 +112,9 @@ support-copilot/
 │   │   ├── [x] config.py                 (AppConfig loader with 5-tier priority hierarchy, Step 1.2)
 │   │   ├── [ ] pricing.py
 │   │   └── resilience/
-│   │       ├── [ ] retry.py
+│   │       ├── [x] __init__.py           (Step 1.5)
+│   │       ├── [x] sleep.py              (Sleeper protocol & AsyncioSleeper, Step 1.5)
+│   │       ├── [x] retry.py              (Transient error classification, Step 1.5)
 │   │       ├── [ ] circuit_breaker.py
 │   │       ├── [ ] rate_limiter.py
 │   │       └── [ ] fallback.py
@@ -122,7 +124,11 @@ support-copilot/
 │   │   ├── [x] schemas.py                (Frozen request/response schemas, Step 1.3)
 │   │   ├── [x] registry.py               (ChatModel registry, Step 1.4)
 │   │   ├── [ ] factory.py
-│   │   ├── wrappers/                     retrying, fallback, cached, traced, metered
+│   │   ├── wrappers/
+│   │   │   ├── [x] __init__.py           (Step 1.5)
+│   │   │   ├── [x] retrying.py           (RetryingChatModel with backoff, jitter, retry_after, Step 1.5)
+│   │   │   ├── [x] fallback.py           (FallbackChatModel sequential chain with provider recording, Step 1.5)
+│   │   │   └── cached, traced, metered
 │   │   └── providers/
 │   │       ├── [x] __init__.py           (Step 1.4)
 │   │       ├── [x] openai_compatible.py  (OpenAI-compatible adapter for Groq, Step 1.4)
@@ -170,7 +176,8 @@ support-copilot/
 │   ├── [x] conftest.py                   (Step 1.1, live marker guard)
 │   ├── fakes/
 │   │   ├── [x] __init__.py               (Step 1.3)
-│   │   └── [x] fake_llm.py               (FakeLLM satisfying ChatModel Protocol, Step 1.3)
+│   │   ├── [x] fake_llm.py               (FakeLLM satisfying ChatModel Protocol, Step 1.3, enhanced Step 1.5)
+│   │   └── [x] fake_sleeper.py           (FakeSleeper for zero-delay clock testing, Step 1.5)
 │   ├── fixtures/corpus/                  hand-written fixture corpus for CI (never live site data)
 │   ├── contract/
 │   │   ├── [x] __init__.py               (Step 1.4)
@@ -183,7 +190,8 @@ support-copilot/
 │   │   ├── [x] test_errors.py            (Step 1.2: exception hierarchy, provider/component attributes, retry_after)
 │   │   ├── [x] test_registry.py          (Step 1.2: generic Registry[T] validation, creation, duplicate guard)
 │   │   ├── [x] test_config.py            (Step 1.2: YAML loading, env overrides, priority hierarchy, prod secret guard)
-│   │   └── [x] test_llm_port.py          (Step 1.3: Protocol runtime check, frozen schemas, role rejection)
+│   │   ├── [x] test_llm_port.py          (Step 1.3: Protocol runtime check, frozen schemas, role rejection)
+│   │   └── [x] test_llm_wrappers.py      (Step 1.5: Retrying transient backoff, Fallback chain, Groq->Gemini)
 │   └── integration/
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
 ├── docker/
@@ -232,6 +240,7 @@ One row per delivery. Claude adds a row every time it ships files.
 | 8 | 2026-11-04 | 1.2 Core package | `src/copilot/core/types.py`, `src/copilot/core/errors.py`, `src/copilot/core/registry.py`, `src/copilot/core/config.py`, `tests/unit/test_errors.py`, `tests/unit/test_registry.py`, `tests/unit/test_config.py`, `pyproject.toml` | 25 unit tests added: 7 in `test_errors.py`, 9 in `test_registry.py`, 9 in `test_config.py`. Proves registry duplicate guard, unknown listing, component instantiation, 5-tier config priority hierarchy, YAML + env overrides, production secret validation, shared errors, and non-negative retry_after | `make check` (or `uv run pytest tests/unit -v`) | yes (all 86 unit tests passed, mypy and ruff 0 issues) |
 | 9 | 2026-11-04 | 1.3 LLM port | `src/copilot/llm/schemas.py`, `src/copilot/llm/base.py`, `src/copilot/llm/__init__.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_port.py`, `pyproject.toml` | 6 unit tests in `test_llm_port.py`: ChatModel Protocol runtime check (`isinstance`), FakeLLM completion and call history recording, frozen schemas immutability, invalid role rejection, request boundary checks, extra fields forbidden | `make check` (or `uv run pytest tests/unit/test_llm_port.py -v`) | yes (all 92 unit tests passed, mypy and ruff 0 issues) |
 | 10 | 2026-11-05 | 1.4 First provider | `src/copilot/llm/providers/openai_compatible.py`, `src/copilot/llm/providers/__init__.py`, `src/copilot/llm/registry.py`, `src/copilot/core/config.py`, `src/copilot/core/errors.py`, `configs/base.yaml`, `configs/dev.yaml`, `tests/contract/__init__.py`, `tests/contract/test_llm_contract.py`, `tests/unit/test_errors.py`, `tests/unit/test_config.py` | 19 tests added: 12 mocked HTTP contract tests parametrized across registered providers (`openai_compatible`, `groq`), 4 lifecycle/isolation tests, 1 live manual Groq test (`test_live_groq_manual_call`), 2 unit tests in `test_errors.py` (numeric & HTTP-date `retry_after`), 1 unit test in `test_config.py` (YAML roles loading) | `make check` (or `uv run pytest tests/contract/test_llm_contract.py -v`) | yes (all 111 offline tests passed, 3 live tests deselected) |
+| 11 | 2026-11-06 | 1.5 LLM wrappers (Retrying and Fallback) | `src/copilot/core/resilience/sleep.py`, `src/copilot/core/resilience/retry.py`, `src/copilot/core/resilience/__init__.py`, `src/copilot/llm/wrappers/retrying.py`, `src/copilot/llm/wrappers/fallback.py`, `src/copilot/llm/wrappers/__init__.py`, `src/copilot/llm/__init__.py`, `src/copilot/llm/providers/openai_compatible.py`, `src/copilot/core/config.py`, `configs/base.yaml`, `tests/fakes/fake_sleeper.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_wrappers.py`, `tests/unit/test_config.py`, `tests/contract/test_llm_contract.py`, `LOG.md`, `PROJECT_STATE.md` | 30 tests added (+22 unit tests in `test_llm_wrappers.py`, +6 contract tests for registered `gemini` adapter, +2 live tests): proves retrying on transient errors, strict non-reductive jitter for retry_after, distinct logging for retry_exhausted vs non_retryable_error, fake clock backoff, fallback on rate limiting, raising last error, recording answering provider, composed Groq->Gemini fallback chain, and non-leakage logging | `make check` (or `uv run pytest tests/unit/test_llm_wrappers.py tests/contract/test_llm_contract.py -v`) | yes (all 139 offline tests passed, 5 live tests deselected) |
 
 ---
 

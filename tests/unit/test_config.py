@@ -101,3 +101,7 @@ def test_real_base_yaml_loads_llm_roles() -> None:
     assert cfg.llm.roles["answer"] == "openai/gpt-oss-120b"
     assert cfg.llm.roles["judge"] == "openai/gpt-oss-120b"
     assert cfg.llm.providers["groq"].base_url == "https://api.groq.com/openai/v1"
+    assert (
+        cfg.llm.providers["gemini"].base_url
+        == "https://generativelanguage.googleapis.com/v1beta/openai/"
+    )

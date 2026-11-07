@@ -217,4 +217,51 @@ Numbers:
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
 
+## 2026-11-06 · Session 7: LLM wrappers (Retrying and Fallback) (Step 1.5)
+
+Did:
+- Step 1.5: Built Retrying and Fallback wrappers adhering to Ports-and-Adapters with clock dependency injection and chained Groq -> Gemini fallback:
+  - `src/copilot/core/resilience/sleep.py`: Created `Sleeper` protocol and production `AsyncioSleeper` implementation to allow deterministic clock dependency injection in retrying wrappers.
+  - `src/copilot/core/resilience/retry.py`: Implemented `is_transient_error()` to enforce strict transient error classification. Explicitly forbids retries on `AuthError`, `InvalidInputError`, and Python language/runtime bugs (`TypeError`, `AttributeError`, etc.), while authorizing retries on `RateLimitError`, `ProviderTimeout`, and transient 502/503/504 server errors.
+  - `src/copilot/core/resilience/__init__.py`: Exported resilience primitives (`Sleeper`, `AsyncioSleeper`, `is_transient_error`).
+  - `src/copilot/llm/wrappers/retrying.py`: Built `RetryingChatModel` wrapping `ChatModel` to retry transient failures up to `max_attempts` using exponential backoff, full jitter, and respecting `retry_after` from `RateLimitError`. Employs structured logging (`provider`, `attempt`, `error`, `delay`) without leaking API keys, headers, or request content.
+  - `src/copilot/llm/wrappers/fallback.py`: Built `FallbackChatModel` wrapping a sequence of `ChatModel` providers. Moves to the next provider on `ProviderError` (e.g. `RateLimitError`, `ProviderTimeout`), raises immediately on `InvalidInputError` or code bugs without attempting fallbacks, raises the last error in the chain when all providers fail, records which provider answered in `response.provider`, and delegates cleanup via `aclose()`.
+  - `src/copilot/llm/wrappers/__init__.py`: Re-exported `RetryingChatModel` and `FallbackChatModel`.
+  - `src/copilot/llm/__init__.py`: Exported `RetryingChatModel` and `FallbackChatModel`.
+  - Registered `"gemini"` in `llm_registry` (`src/copilot/llm/providers/openai_compatible.py`) and configured Gemini's official OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai/`) in `configs/base.yaml` and default `LLMConfig.providers`.
+  - `scripts/test_live_models.py`: Upgraded live discovery and benchmarking script to support both Groq and Gemini, benchmarking latency, token usage, and response previews across models.
+  - `tests/fakes/fake_sleeper.py`: Created `FakeSleeper` recording sleep durations with zero wall-clock delay.
+  - `tests/fakes/fake_llm.py`: Enhanced `FakeLLM` to support sequential queued side-effects/exceptions, configurable `provider_name`, and `closed` state tracking.
+  - `tests/fakes/__init__.py`: Exported `FakeSleeper`.
+  - `tests/unit/test_llm_wrappers.py`: Added 22 comprehensive unit tests covering immediate success, two transient errors then success, giving up after maximum attempts, non-retryable errors (`AuthError`, `InvalidInputError`, `TypeError`), backoff and jitter calculations, strictly respecting `retry_after` as minimum delay without reductive jitter, logging distinctions between `retry_exhausted` and `non_retryable_error`, fallback on rate limiting/timeout, raising the last error, provider recording, `aclose()` delegation, composed Groq -> Gemini fallback chains, and privacy-preserving structured logging.
+  - `tests/contract/test_llm_contract.py`: Automatically runs offline contract test suite against registered `gemini` adapter (+6 contract tests), and added `@pytest.mark.live` manual tests for Gemini and the live fallback chain.
+
+Broke:
+- First live Gemini manual test and fallback chain failed with `404 Not Found` when requesting deprecated models (`gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-2.5-*`) or attempting `client.models.list()` against Google's OpenAI-compatible endpoint (which does not support `/models`).
+- `gemini-3.8-flash` and `gemini-3.6-flash` timed out on live calls (`The read operation timed out > 30s`) due to heavy reasoning generation and congested quota limits (20 RPD).
+- Constrained token budgets (`max_tokens=20`) caused reasoning models to spend all tokens on internal chain-of-thought, yielding empty `content` and triggering `AssertionError: assert len('') > 0`.
+- Broad `except Exception:` in test candidate loops caught assertion failures and masked root causes as provider 404s.
+- Ruff format check failed on `RUF043` for unescaped decimal in regex pattern (`1.0`).
+
+Fixed:
+- Benchmarked active Gemini models using `scripts/test_live_models.py`, identifying `gemini-3.1-flash-lite` (1.434s, 500 RPD) and `gemini-3.5-flash-lite` (1.849s, 500 RPD) as the fastest 200 OK models.
+- Set `gemini-3.1-flash-lite` as default model in `configs/base.yaml` and `AppConfig`, eliminating live test timeouts.
+- Increased live test token budgets to `max_tokens=100` and enhanced `_map_response()` to extract thinking tokens from `reasoning_content`, `reasoning`, and `thought`.
+- Restricted test loop exception handling to `(ProviderError, openai.APIError)` so assertion errors fail immediately with clear messages.
+- Fixed `RUF043` with raw regex `r"backoff_factor must be >= 1\.0"`.
+- Enforced strict transient error classification so `RetryingChatModel` never catches or retries `AuthError`, `InvalidInputError`, or developer programming bugs.
+- Fixed jitter behavior on `RateLimitError`: server-specified `retry_after` is strictly honored as mandatory minimum delay; jitter only adds a positive buffer.
+- Distinguished between `retry_exhausted` and `non_retryable_error` in logger metadata.
+- Decoupled clock and sleep delays from `asyncio.sleep` via `Sleeper` dependency injection, keeping tests instant and deterministic.
+- Ensured `FallbackChatModel` propagates the last error when all providers fail and transparently reflects the answering provider in `response.provider`.
+- Ensured logging outputs structured metadata (`provider`, `attempt`, `fallback_used`) without leaking secrets or prompts.
+
+Numbers:
+- 144 test items collected: 139 passed offline tests (+28 new offline tests: 22 wrapper tests in `test_llm_wrappers.py`, +6 parametrized contract tests for `gemini`), 5 live tests deselected by default.
+- Live test latency: `gemini-3.1-flash-lite` responding in 1.434s, `gemini-3.5-flash-lite` in 1.849s.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
+
 

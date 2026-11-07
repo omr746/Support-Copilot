@@ -12,15 +12,18 @@ from copilot.llm.schemas import (
     Role,
     TokenUsage,
 )
+from copilot.llm.wrappers import FallbackChatModel, RetryingChatModel
 
 __all__ = [
     "ChatMessage",
     "ChatModel",
     "ChatRequest",
     "ChatResponse",
+    "FallbackChatModel",
     "FinishReason",
     "ModelRole",
     "OpenAICompatibleChatModel",
+    "RetryingChatModel",
     "Role",
     "TokenUsage",
     "llm_registry",
