@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-06 · Delivery count: 11 (rows 1 to 11 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-07 · Delivery count: 12 (rows 1 to 12 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0, Step 1.1, Step 1.2, Step 1.3, Step 1.4, and Step 1.5 are complete. Next: Step 1.6 (LLM wrappers: Cached, Traced, Metered, and factory).
+Plan progress: Step 0, Step 1.1, Step 1.2, Step 1.3, Step 1.4, Step 1.5, and Step 1.6 are complete. Next: Step 1.7 (Observability: structured logging, tracing, metrics).
 
 ---
 
@@ -160,11 +160,15 @@ support-copilot/
 │   │   ├── [ ] context.py  [ ] logging.py  [ ] redaction.py
 │   │   ├── [ ] tracing.py  [ ] metrics.py  [ ] middleware.py  [ ] health.py
 │   └── api/
-│       ├── [x] __init__.py               (Step 1.1 package skeleton)
-│       ├── [ ] main.py
-│       ├── [ ] container.py
+│       ├── [x] __init__.py               (Step 1.1 package skeleton, Step 1.6 API exports)
+│       ├── [x] schemas.py                (Step 1.6: AskRequest, AskResponse, HealthResponse, ReadyResponse)
+│       ├── [x] main.py                   (Step 1.6: FastAPI create_app, lifespan, exception handlers)
+│       ├── [x] container.py              (Step 1.6: Container composition root, readiness checks, DI)
 │       ├── [ ] auth.py                   (visitor identity, Plan Step 3.9)
-│       └── routes/                       ask, voice, approvals, feedback, files, sources
+│       └── routes/
+│           ├── [x] __init__.py           (Step 1.6)
+│           ├── [x] health.py             (Step 1.6: /healthz and /readyz probes)
+│           └── [x] ask.py                (Step 1.6: /ask stub calling answer role)
 ├── evals/
 │   ├── core/                             evaluator, metric, dataset, runner, report, gates
 │   ├── eval_asr/  eval_tts/  eval_llm/  eval_voice_e2e/
@@ -191,7 +195,8 @@ support-copilot/
 │   │   ├── [x] test_registry.py          (Step 1.2: generic Registry[T] validation, creation, duplicate guard)
 │   │   ├── [x] test_config.py            (Step 1.2: YAML loading, env overrides, priority hierarchy, prod secret guard)
 │   │   ├── [x] test_llm_port.py          (Step 1.3: Protocol runtime check, frozen schemas, role rejection)
-│   │   └── [x] test_llm_wrappers.py      (Step 1.5: Retrying transient backoff, Fallback chain, Groq->Gemini)
+│   │   ├── [x] test_llm_wrappers.py      (Step 1.5: Retrying transient backoff, Fallback chain, Groq->Gemini)
+│   │   └── [x] test_api.py               (Step 1.6: healthz, readyz 503/200, ask DI override, 422 validation)
 │   └── integration/
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
 ├── docker/
@@ -241,6 +246,7 @@ One row per delivery. Claude adds a row every time it ships files.
 | 9 | 2026-11-04 | 1.3 LLM port | `src/copilot/llm/schemas.py`, `src/copilot/llm/base.py`, `src/copilot/llm/__init__.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_port.py`, `pyproject.toml` | 6 unit tests in `test_llm_port.py`: ChatModel Protocol runtime check (`isinstance`), FakeLLM completion and call history recording, frozen schemas immutability, invalid role rejection, request boundary checks, extra fields forbidden | `make check` (or `uv run pytest tests/unit/test_llm_port.py -v`) | yes (all 92 unit tests passed, mypy and ruff 0 issues) |
 | 10 | 2026-11-05 | 1.4 First provider | `src/copilot/llm/providers/openai_compatible.py`, `src/copilot/llm/providers/__init__.py`, `src/copilot/llm/registry.py`, `src/copilot/core/config.py`, `src/copilot/core/errors.py`, `configs/base.yaml`, `configs/dev.yaml`, `tests/contract/__init__.py`, `tests/contract/test_llm_contract.py`, `tests/unit/test_errors.py`, `tests/unit/test_config.py` | 19 tests added: 12 mocked HTTP contract tests parametrized across registered providers (`openai_compatible`, `groq`), 4 lifecycle/isolation tests, 1 live manual Groq test (`test_live_groq_manual_call`), 2 unit tests in `test_errors.py` (numeric & HTTP-date `retry_after`), 1 unit test in `test_config.py` (YAML roles loading) | `make check` (or `uv run pytest tests/contract/test_llm_contract.py -v`) | yes (all 111 offline tests passed, 3 live tests deselected) |
 | 11 | 2026-11-06 | 1.5 LLM wrappers (Retrying and Fallback) | `src/copilot/core/resilience/sleep.py`, `src/copilot/core/resilience/retry.py`, `src/copilot/core/resilience/__init__.py`, `src/copilot/llm/wrappers/retrying.py`, `src/copilot/llm/wrappers/fallback.py`, `src/copilot/llm/wrappers/__init__.py`, `src/copilot/llm/__init__.py`, `src/copilot/llm/providers/openai_compatible.py`, `src/copilot/core/config.py`, `configs/base.yaml`, `tests/fakes/fake_sleeper.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_wrappers.py`, `tests/unit/test_config.py`, `tests/contract/test_llm_contract.py`, `LOG.md`, `PROJECT_STATE.md` | 30 tests added (+22 unit tests in `test_llm_wrappers.py`, +6 contract tests for registered `gemini` adapter, +2 live tests): proves retrying on transient errors, strict non-reductive jitter for retry_after, distinct logging for retry_exhausted vs non_retryable_error, fake clock backoff, fallback on rate limiting, raising last error, recording answering provider, composed Groq->Gemini fallback chain, and non-leakage logging | `make check` (or `uv run pytest tests/unit/test_llm_wrappers.py tests/contract/test_llm_contract.py -v`) | yes (all 139 offline tests passed, 5 live tests deselected) |
+| 12 | 2026-11-07 | 1.6 API (/healthz, /readyz, /ask, composition root) | `src/copilot/api/schemas.py`, `src/copilot/api/container.py`, `src/copilot/api/main.py`, `src/copilot/api/routes/__init__.py`, `src/copilot/api/routes/health.py`, `src/copilot/api/routes/ask.py`, `src/copilot/api/__init__.py`, `tests/unit/test_api.py`, `LOG.md`, `PROJECT_STATE.md` | 18 unit tests in `tests/unit/test_api.py`: /healthz returns 200, /readyz returns 200 when up and 503 when dependency down, async checks, /ask returns FakeLLM answer through dependency override (`get_answer_model` and `get_container`), 422 validation on empty/invalid/extra payload, domain error translation (429, 502, 504), container lifecycle cleanup, and production fallback chain construction | `make check` (or `uv run pytest tests/unit/test_api.py -v`) | yes (all 157 offline tests passed, 5 live tests deselected) |
 
 ---
 
@@ -252,7 +258,7 @@ One row per delivery. Claude adds a row every time it ships files.
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
    - Before Step 2.0a (not before Week 1): read the te.eg `robots.txt` and terms of use and write the result in `LOG.md`. The Knowledge base entry still says "Not checked yet".
-2. **Next step: Step 1.5 (LLM wrappers: Retrying and Fallback)**
+2. **Next step: Step 1.7 (Observability: structured logging, tracing, metrics)**
    - Retrying wrapper: exponential backoff with jitter on `RateLimitError` and `ProviderTimeout`, respecting `retry_after`.
    - Fallback wrapper: secondary provider execution on non-transient or exhausted errors (Groq -> Gemini).
    - Contract test suite: verifying wrappers preserve the `ChatModel` Protocol and transparently retry or fall back.

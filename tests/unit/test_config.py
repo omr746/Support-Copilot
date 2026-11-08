@@ -105,3 +105,7 @@ def test_real_base_yaml_loads_llm_roles() -> None:
         cfg.llm.providers["gemini"].base_url
         == "https://generativelanguage.googleapis.com/v1beta/openai/"
     )
+    assert cfg.llm.fallback_provider == "gemini"
+    assert cfg.llm.fallback_model == "gemini-3.1-flash-lite"
+    assert cfg.llm.fallbackmodel == "gemini-3.1-flash-lite"
+    assert cfg.llm.fallbackprovider == "gemini"

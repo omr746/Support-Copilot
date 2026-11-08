@@ -48,6 +48,11 @@ class RetryingChatModel:
         self._is_transient = is_transient or is_transient_error
 
     @property
+    def model(self) -> ChatModel:
+        """Underlying wrapped ChatModel instance."""
+        return self._model
+
+    @property
     def provider_name(self) -> str:
         return self._model.provider_name
 
