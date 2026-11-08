@@ -72,9 +72,19 @@ class LLMProviderConfig(BaseModel):
 class LLMConfig(BaseModel):
     """Configuration for LLM providers and role-to-model mapping."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     default_provider: str = "groq"
+    fallback_provider: str | None = Field(
+        default="gemini",
+        alias="fallbackprovider",
+        description="Secondary fallback provider name from providers mapping.",
+    )
+    fallback_model: str | None = Field(
+        default="gemini-3.1-flash-lite",
+        alias="fallbackmodel",
+        description="Model override for the fallback provider.",
+    )
     roles: dict[str, str] = Field(
         default_factory=lambda: {
             "router": "openai/gpt-oss-20b",
@@ -82,6 +92,17 @@ class LLMConfig(BaseModel):
             "judge": "openai/gpt-oss-120b",
         }
     )
+
+    @property
+    def fallbackmodel(self) -> str | None:
+        """Alias property for fallback_model."""
+        return self.fallback_model
+
+    @property
+    def fallbackprovider(self) -> str | None:
+        """Alias property for fallback_provider."""
+        return self.fallback_provider
+
     providers: dict[str, LLMProviderConfig] = Field(
         default_factory=lambda: {
             "groq": LLMProviderConfig(

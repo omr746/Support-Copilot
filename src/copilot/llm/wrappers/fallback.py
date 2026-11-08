@@ -57,6 +57,11 @@ class FallbackChatModel:
         return tuple(self._models)
 
     @property
+    def providers(self) -> tuple[ChatModel, ...]:
+        """Sequence of underlying models in the fallback chain (alias for models)."""
+        return self.models
+
+    @property
     def provider_name(self) -> str:
         """Name of the primary provider in the fallback chain."""
         return self._models[0].provider_name

@@ -263,5 +263,38 @@ Numbers:
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
 
+## 2026-11-07 · Session 8: API layer and composition root (Step 1.6)
+
+Did:
+- Step 1.6: Built production FastAPI application, probes, and composition root adhering to ADR-0001:
+  - `src/copilot/api/schemas.py`: Defined strict request/response schemas: `AskRequest` (`extra="forbid"`, `min_length=1`), `AskResponse` (`answer`, `model`, `provider`, `session_id`), `HealthResponse` (`status="ok"`), and `ReadyResponse` (`status`, `checks`).
+  - `src/copilot/api/container.py`: Implemented `Container` (the composition root) responsible for object graph wiring, building production model chains for roles (`answer`, `router`, `judge`) dynamically resolving primary provider and fallback provider/model from configuration, registering pluggable dependency readiness checks, managing resource lifecycle via `aclose()`, and providing FastAPI dependency injection helpers (`get_container`, `get_answer_model`).
+  - `src/copilot/core/config.py` & `configs/base.yaml`: Added `fallback_provider` and `fallback_model` configuration variables to `LLMConfig`, eliminating hardcoded provider strings from the composition root.
+  - `src/copilot/api/routes/health.py`: Built `/healthz` liveness probe (returns 200 unconditionally) and `/readyz` readiness probe (returns 200 when all dependencies report ok, 503 Service Unavailable when any dependency reports down or throws an error). Supports both sync and async probe callables.
+  - `src/copilot/api/routes/ask.py`: Built `/ask` endpoint submitting queries to the injected `answer` model, translating domain errors (`RateLimitError` to 429 with `Retry-After`, `ProviderTimeout` to 504, `ProviderError` to 502).
+  - `src/copilot/api/routes/__init__.py`: Exported route modules.
+  - `src/copilot/api/main.py`: Built `create_app()` factory with `lifespan` employing `try ... finally` to guarantee resource closure under cancellations or crashes, mounted routers, and registered global exception handlers with sanitized public error messages.
+  - `src/copilot/api/__init__.py`: Exported public API symbols.
+  - `tests/unit/test_api.py`: Added 23 comprehensive unit tests using FastAPI `TestClient` verifying `/healthz` 200, `/readyz` 200 when up and 503 when down, async probe execution, `/ask` FakeLLM answer through dependency override, composition root override, 422 validation on empty/invalid/extra payload, domain error translation with sanitized public error payloads, single-close verification for leaf adapters, and lifespan `try ... finally` guarantees.
+
+Broke:
+- No test failures. TestClient and FakeLLM execute completely offline with zero network calls.
+
+Fixed:
+- Enforced strict payload validation (`extra="forbid"`, `min_length=1`) ensuring bad payloads consistently trigger HTTP 422 Unprocessable Entity.
+- Configured routes to handle both root and trailing slash paths (`/healthz` and `/healthz/`, `/readyz` and `/readyz/`, `/ask` and `/ask/`) avoiding 307 redirects.
+- Translated domain exceptions into appropriate HTTP status codes (429, 502, 504) preventing unhandled 500 tracebacks.
+- Hardened `/readyz` security: sanitized probe responses to return strictly `"down"` without exposing raw exception text, preventing accidental leakage of internal hostnames, ports, or database connection credentials. Full exception context is logged internally with `logger.warning`.
+- Enforced public vs. internal error separation: sanitized client error responses (`{"detail": "The AI provider request failed.", "provider": exc.provider}`) to prevent leaking raw vendor traces, endpoints, or error JSON, while logging full context internally.
+- Secured application lifespan with `try ... finally` to guarantee `container.aclose()` execution even if unhandled exceptions or cancellations occur during runtime.
+- Replaced silent `except Exception: pass` during fallback provider initialization with structured warning logs, ensuring configuration or runtime errors are visible for operational monitoring.
+- Resolved double-close risk in `Container.aclose()` by establishing clear hierarchical ownership: Container manages root model chains which delegate recursively through wrapper trees to underlying adapters, ensuring leaf clients are closed exactly once.
+
+Numbers:
+- 167 test items collected: 162 passed offline tests (+23 new unit tests in `tests/unit/test_api.py`), 5 live tests deselected by default.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
 
 

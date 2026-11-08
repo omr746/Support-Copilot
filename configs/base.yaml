@@ -6,6 +6,8 @@ crawl_contact: ""
 # LLM role-to-model mapping and provider configurations
 llm:
   default_provider: groq
+  fallback_provider: gemini
+  fallback_model: gemini-3.1-flash-lite
   roles:
     router: openai/gpt-oss-20b
     answer: openai/gpt-oss-120b
