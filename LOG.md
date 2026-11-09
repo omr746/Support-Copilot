@@ -296,5 +296,79 @@ Numbers:
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
 
+## 2026-11-09 · Session 9: Observability and structured logging (Step 1.7)
+
+Did:
+- Step 1.7: Built structured logging pipeline with structlog, request_id correlation, and PII redaction adhering to ADR-0001:
+  - `src/copilot/observability/context.py`: Implemented context propagation using Python `contextvars` (`_request_id_var`, `get_request_id`, `set_request_id`, `clear_context`).
+  - `src/copilot/observability/redaction.py`: Built PII and secret redaction processor masking emails (`[REDACTED_EMAIL]`), phone numbers (`[REDACTED_PHONE]`), credit/debit card numbers (`[REDACTED_CARD]`), and tokens/API keys (`[REDACTED_TOKEN]`). Supports recursive traversal of strings, dictionaries, lists, and tuples, and automatically scrubs sensitive dictionary keys.
+  - `src/copilot/observability/logging.py`: Configured structlog JSON output pipeline combining contextvars merging, timestamping, logger naming, log levels, redaction processor, and JSONRenderer. Configured standard library root logger to route through structlog's `ProcessorFormatter`.
+  - `src/copilot/observability/middleware.py`: Built `RequestIDMiddleware` extracting incoming `X-Request-ID` (or `X-Correlation-ID`) or generating a new UUID, binding `request_id` to contextvars and structlog context, injecting `X-Request-ID` into response headers, and emitting structured access logs at INFO level. Strictly omits request and response message bodies from INFO logs.
+  - `src/copilot/observability/__init__.py`: Exported public observability symbols.
+  - `src/copilot/api/main.py`: Integrated `RequestIDMiddleware` into the FastAPI application.
+  - `tests/unit/test_logging.py`: Added 10 comprehensive unit tests verifying valid JSON output with request_id, request_id consistency across lines of a single request and variance across consecutive requests, client header preservation, redaction of emails, phones, cards, and tokens, structlog pipeline integration, and confirming zero message bodies appear in INFO logs.
+
+Broke:
+- No test failures. All logging and middleware tests run completely offline without external network dependencies.
+
+Fixed:
+- Enforced privacy boundary at INFO log level: access logging records only HTTP metadata (method, path, status, latency, request_id), ensuring customer query bodies never leak into persistent application logs.
+- Hardened token redaction to scrub Authorization Bearer tokens, prefixed API keys (`gsk_`, `sk-`, `AIzaSy`, JWTs), key-value patterns, and sensitive dictionary keys.
+- Ensured context variable cleanup in middleware `finally` block to prevent correlation ID leakage across async request contexts.
+
+Numbers:
+- 177 test items collected: 172 passed offline tests (+10 new unit tests in `tests/unit/test_logging.py`), 5 live tests deselected by default.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
+## 2026-11-09 · Session 10: Logging pipeline hardening & runtime integration (Step 1.7 refinements)
+
+Did:
+- Refined `src/copilot/observability/logging.py` based on code review feedback:
+  - Removed unused `Any` import for code cleanliness.
+  - Separated structlog native processors from foreign standard library pre-chain (`foreign_pre_chain`), using `ExtraAdder()` and safe `_extract_stdlib_logger_name` instead of calling `add_logger_name` on non-structlog loggers.
+  - Replaced fallback `getattr` with strict log level validation against `VALID_LOG_LEVELS` ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"), failing fast with descriptive `ValueError` on invalid values.
+  - Set explicit filtering level on root stream handler (`handler.setLevel(level_num)`) matching root logger level.
+  - Implemented safe root handler replacement: existing handlers are flushed, closed, and removed cleanly via `removeHandler` before adding the configured handler.
+  - Intercepted Uvicorn loggers (`uvicorn`, `uvicorn.error`, `uvicorn.access`): cleared existing handlers and set `propagate = True` so web server logs route through the structlog JSON formatter without duplication.
+  - Added idempotency guard (`_is_configured`) and `reset_logging_configuration()` with `structlog.reset_defaults()` to prevent cache pollution and state drift across re-initializations.
+- Updated `src/copilot/api/main.py`: Called `configure_logging()` once during FastAPI `lifespan` startup.
+- Hardened `src/copilot/observability/middleware.py`:
+  - Migrated `RequestIDMiddleware` from `BaseHTTPMiddleware` to a Pure ASGI Middleware, eliminating anyio task-group overhead and guaranteeing reliable contextvar propagation.
+  - Added strict validation for incoming `X-Request-ID` / `X-Correlation-ID` using `REQUEST_ID_PATTERN` (`^[a-zA-Z0-9._-]{1,128}$`), rejecting CRLF, control characters, spaces, HTML, and oversized strings with fallback to `uuid.uuid4().hex`.
+  - Guaranteed `X-Request-ID` response header injection on all HTTP responses (including 4xx and 5xx errors) by intercepting `http.response.start`.
+  - Enhanced error privacy: removed raw `error=str(exc)` from failure logs to prevent leaking internal database connection strings, credentials, or user inputs; logged `error_type=type(exc).__name__` instead.
+  - Restored prior ContextVar state properly via `reset_request_id(token)` in `finally` instead of blanket clearing.
+- Handled request_id lifecycle vs request scope policy:
+  - Outside an HTTP request (startup, shutdown, background workers), `request_id` is omitted by default to maintain clean log indices and avoid noise in query aggregators (e.g., Datadog, Elasticsearch).
+  - Added configurable `default_request_id: str | None = None` to `configure_logging()` allowing teams/infrastructure that mandate fixed-column schemas to emit a sentinel value (such as `"-"`).
+  - Added processor `_inject_request_id` synchronizing `get_request_id()` from contextvars directly into all logs.
+- Fixed strict Mypy typing issues in observability pipeline:
+  - Updated `redaction_processor` to accept and return `MutableMapping[str, Any]` matching structlog's `Processor` protocol (`Callable[[Any, str, MutableMapping[str, Any]], ...]`), eliminating type incompatibility in processor lists.
+  - Removed unused `type: ignore[return-value]` in `redaction_processor`.
+  - Added explicit `cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))` in `get_logger()` to satisfy `--disallow-any-return`.
+- Fixed stdlib log `extra` attribute extraction and redaction:
+  - Reordered `foreign_pre_chain` in `logging.py` so `structlog.stdlib.ExtraAdder()` executes before `redaction_processor`, ensuring all extra fields are present in `event_dict` prior to redaction.
+  - Hardened `redaction_processor` to automatically pull and sanitize any unextracted custom attributes from `_record.__dict__`, eliminating `KeyError` on `extra` fields and preventing secrets from bypassing redaction.
+  - Updated test formatters to include `ExtraAdder()`.
+- Updated `tests/unit/test_logging.py`: Added 10 unit tests verifying strict level validation, safe root handler replacement, Uvicorn logger interception and propagation, configuration idempotence, foreign log formatting, lifecycle schema behaviors, malicious request ID sanitization, error response header attachment, and contextvar token restoration.
+
+Broke:
+- No test failures.
+
+Fixed:
+- Eliminated risk of `add_logger_name` failure on foreign standard library records by cleanly segregating structlog and foreign pre-chains.
+- Prevented potential duplicate and unformatted log lines from Uvicorn by intercepting its child loggers and clearing their default stream handlers.
+- Guarded against cached logger corruption across repeated calls via `structlog.reset_defaults()`.
+- Prevented HTTP header injection and contextvar leakage in ASGI middleware.
+
+Numbers:
+- 187 test items collected: 182 passed offline tests (+10 new unit tests in `tests/unit/test_logging.py`), 5 live tests deselected by default.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
+
 
 

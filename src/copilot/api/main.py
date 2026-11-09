@@ -19,6 +19,7 @@ from copilot.core.errors import (
     ProviderTimeout,
     RateLimitError,
 )
+from copilot.observability import RequestIDMiddleware, configure_logging
 
 logger = logging.getLogger("copilot.api")
 
@@ -26,6 +27,9 @@ logger = logging.getLogger("copilot.api")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycle with guaranteed cleanup."""
+    # Startup: ensure structlog and standard library logging are configured once
+    configure_logging()
+
     # Startup: ensure Container exists on app.state
     container: Container | None = getattr(app.state, "container", None)
     if container is None:
@@ -56,6 +60,9 @@ def create_app(
 
     app.state.config = config
     app.state.container = container
+
+    # Register middleware
+    app.add_middleware(RequestIDMiddleware)
 
     # Register routers
     app.include_router(health_router)
