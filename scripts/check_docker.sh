@@ -53,8 +53,8 @@ echo "[OK] ffmpeg verified."
 echo "=== 6. Querying /healthz probe ==="
 healthz_resp=$(curl -fsS "http://localhost:${PORT}/healthz")
 echo "/healthz response: $healthz_resp"
-if [[ "$healthz_resp" != *"healthy"* ]]; then
-    echo "ERROR: /healthz probe did not return healthy status"
+if [[ "$healthz_resp" != *'"status":"ok"'* ]]; then
+    echo "ERROR: /healthz probe did not return expected status"
     exit 1
 fi
 echo "[OK] /healthz returned HTTP 200 with healthy payload."
