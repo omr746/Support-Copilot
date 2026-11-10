@@ -85,6 +85,10 @@ support-copilot/
 ├── [x] README.md                         (you created it; Claude has not seen it)
 ├── [x] Makefile                          (Step 1.1)
 ├── [x] .importlinter                     (Step 1.1)
+├── [x] .dockerignore                     (Step 1.8)
+├── [x] Dockerfile                        (multi-stage, non-root, ffmpeg, Step 1.8)
+├── [x] docker-compose.yml                (core profile: app, pgvector, redis, Step 1.8)
+├── [x] docker-compose.ci.yml             (CI test orchestration, Step 1.8)
 ├── [x] LOG.md                            (decisions plus sessions 1 to 4, Plan Step 0.3, 1.1, 1.2)
 ├── [x] PROJECT_STATE.md                  (this file)
 ├── scripts/
@@ -92,6 +96,7 @@ support-copilot/
 │   ├── [x] check_keys_live.py            (Plan Step 0.2, live key check)
 │   ├── [x] check_docs.py                 (Plan Step 0.3, LOG.md and docs/adr check)
 │   ├── [x] check_adrs.py                 (Plan Step 0.5, ADR lint)
+│   ├── [x] check_docker.sh               (Plan Step 1.8, Docker build, size, non-root, probes)
 │   ├── [x] test_live_models.py           (Live Groq model discovery and benchmark tool, zero-dep)
 │   └── [ ] smoke.sh                      (Plan Step 1.10)
 ├── configs/
@@ -252,7 +257,8 @@ One row per delivery. Claude adds a row every time it ships files.
 | 11 | 2026-11-06 | 1.5 LLM wrappers (Retrying and Fallback) | `src/copilot/core/resilience/sleep.py`, `src/copilot/core/resilience/retry.py`, `src/copilot/core/resilience/__init__.py`, `src/copilot/llm/wrappers/retrying.py`, `src/copilot/llm/wrappers/fallback.py`, `src/copilot/llm/wrappers/__init__.py`, `src/copilot/llm/__init__.py`, `src/copilot/llm/providers/openai_compatible.py`, `src/copilot/core/config.py`, `configs/base.yaml`, `tests/fakes/fake_sleeper.py`, `tests/fakes/fake_llm.py`, `tests/fakes/__init__.py`, `tests/unit/test_llm_wrappers.py`, `tests/unit/test_config.py`, `tests/contract/test_llm_contract.py`, `LOG.md`, `PROJECT_STATE.md` | 30 tests added (+22 unit tests in `test_llm_wrappers.py`, +6 contract tests for registered `gemini` adapter, +2 live tests): proves retrying on transient errors, strict non-reductive jitter for retry_after, distinct logging for retry_exhausted vs non_retryable_error, fake clock backoff, fallback on rate limiting, raising last error, recording answering provider, composed Groq->Gemini fallback chain, and non-leakage logging | `make check` (or `uv run pytest tests/unit/test_llm_wrappers.py tests/contract/test_llm_contract.py -v`) | yes (all 139 offline tests passed, 5 live tests deselected) |
 | 12 | 2026-11-07 | 1.6 API (/healthz, /readyz, /ask, composition root) | `src/copilot/api/schemas.py`, `src/copilot/api/container.py`, `src/copilot/api/main.py`, `src/copilot/api/routes/__init__.py`, `src/copilot/api/routes/health.py`, `src/copilot/api/routes/ask.py`, `src/copilot/api/__init__.py`, `tests/unit/test_api.py`, `LOG.md`, `PROJECT_STATE.md` | 23 unit tests in `tests/unit/test_api.py`: /healthz returns 200, /readyz returns 200 when up and 503 when dependency down, async checks, /ask returns FakeLLM answer through dependency override (`get_answer_model` and `get_container`), 422 validation on empty/invalid/extra payload, domain error translation (429, 502, 504), container lifecycle cleanup, single-close leaf adapter verification, and lifespan try/finally guarantees | `make check` (or `uv run pytest tests/unit/test_api.py -v`) | yes (all 162 offline tests passed, 5 live tests deselected) |
 | 13 | 2026-11-09 | 1.7 Logging (structlog JSON, request_id middleware, redaction) | `src/copilot/observability/context.py`, `src/copilot/observability/redaction.py`, `src/copilot/observability/logging.py`, `src/copilot/observability/middleware.py`, `src/copilot/observability/__init__.py`, `src/copilot/api/main.py`, `tests/unit/test_logging.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests in `tests/unit/test_logging.py`: valid single-line JSON log output with request_id, same request_id across all log lines of a single request, distinct IDs across consecutive requests, client X-Request-ID preservation, PII and secret redaction for email, phone, card, and tokens/API keys, structlog processor pipeline integration, and strict verification that no message body appears in INFO access logs | `make check` (or `uv run pytest tests/unit/test_logging.py -v`) | yes (all 172 offline tests passed, 5 live tests deselected) |
-| 14 | 2026-11-09 | 1.7 Logging refinements (Pure ASGI middleware, ID validation, stdlib segregation, Uvicorn hook) | `src/copilot/observability/middleware.py`, `src/copilot/observability/logging.py`, `src/copilot/observability/__init__.py`, `src/copilot/api/main.py`, `tests/unit/test_logging.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests added (+20 total in `tests/unit/test_logging.py`): Pure ASGI middleware, request_id validation regex, error response header attachment, token restoration, strict log level validation, safe root handlers closing/replacement, Uvicorn logger interception, configuration idempotence, foreign log formatting, and lifecycle request_id schema handling | `make check` (or `uv run pytest tests/unit/test_logging.py -v`) | [~] |
+| 14 | 2026-11-09 | 1.7 Logging refinements (Pure ASGI middleware, ID validation, stdlib segregation, Uvicorn hook) | `src/copilot/observability/middleware.py`, `src/copilot/observability/logging.py`, `src/copilot/observability/__init__.py`, `src/copilot/api/main.py`, `tests/unit/test_logging.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests added (+20 total in `tests/unit/test_logging.py`): Pure ASGI middleware, request_id validation regex, error response header attachment, token restoration, strict log level validation, safe root handlers closing/replacement, Uvicorn logger interception, configuration idempotence, foreign log formatting, and lifecycle request_id schema handling | `make check` (or `uv run pytest tests/unit/test_logging.py -v`) | yes (all 182 offline tests passed, 5 live tests deselected) |
+| 15 | 2026-11-10 | 1.8 Docker (multi-stage Dockerfile, compose core profile, pgvector, redis) | `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `docker-compose.ci.yml`, `scripts/check_docker.sh`, `.github/workflows/ci.yml`, `.env.example`, `tests/unit/test_docker.py`, `LOG.md`, `PROJECT_STATE.md` | 8 unit tests in `tests/unit/test_docker.py` + automated CI execution of `scripts/check_docker.sh`: verifies multi-stage build, non-root user (UID 10001), ffmpeg installation, healthcheck probe, .dockerignore filters, docker-compose core profile (app, pgvector/pgvector:pg16, redis:7-alpine), image size constraint (<= 400 MB), and /healthz + /readyz HTTP 200 responses | `make check` and `bash scripts/check_docker.sh` | [~] |
 
 ---
 
@@ -264,10 +270,8 @@ One row per delivery. Claude adds a row every time it ships files.
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
    - Before Step 2.0a (not before Week 1): read the te.eg `robots.txt` and terms of use and write the result in `LOG.md`. The Knowledge base entry still says "Not checked yet".
-2. **Next step: Step 1.8 (Tracing: OpenTelemetry and Langfuse integration)**
-3. Steps 1.6 to 1.9: Additional wrappers (`Cached`, `Traced`, `Metered`), API (`FastAPI` `/healthz`, `/readyz`, stub `/ask`), logging (`structlog`), Docker, and full CI.
-4. Step 1.10: Deploy the skeleton to Render.
-5. Step 1.10: Deploy the skeleton to Render.
+2. **Next step: Step 1.9 (Full CI pipeline & quality gates: ruff, mypy, import-linter, coverage, and security)**
+3. Step 1.10: Deploy the skeleton to Render.
 
 ---
 
