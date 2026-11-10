@@ -98,7 +98,7 @@ support-copilot/
 │   ├── [x] check_adrs.py                 (Plan Step 0.5, ADR lint)
 │   ├── [x] check_docker.sh               (Plan Step 1.8, Docker build, size, non-root, probes)
 │   ├── [x] test_live_models.py           (Live Groq model discovery and benchmark tool, zero-dep)
-│   └── [ ] smoke.sh                      (Plan Step 1.10)
+│   └── [x] smoke.sh                      (Plan Step 1.10, smoke tests for /healthz, /readyz, /ask)
 ├── configs/
 │   ├── [x] base.yaml                     (model roles: router, answer, judge, and Groq endpoint, Step 1.4)
 │   ├── [ ] crawl.yaml                    (built-in crawl rules, Plan Step 2.0a)

@@ -1,0 +1,54 @@
+# render.yaml — Render Infrastructure as Code (Blueprint)
+# Automatically provisions PostgreSQL (pgvector), Redis, and Web Service in one click.
+
+databases:
+  - name: copilot-postgres
+    databaseName: copilot
+    user: copilot
+    region: frankfurt
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  # Redis-compatible managed Key Value store
+  - type: keyvalue
+    name: copilot-redis
+    region: frankfurt
+    plan: free
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  # FastAPI application
+  - type: web
+    name: support-copilot
+    runtime: docker
+    region: frankfurt
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: copilot-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: copilot-redis
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://cloud.langfuse.com
+      
+

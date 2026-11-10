@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import yaml
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -149,6 +156,26 @@ class AppConfig(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"
+
+    # Infrastructure connection URLs
+    database_url: str = Field(
+        default="postgresql+asyncpg://copilot:copilot@localhost:5432/copilot",
+        validation_alias=AliasChoices("database_url", "DATABASE_URL"),
+    )
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        validation_alias=AliasChoices("redis_url", "REDIS_URL"),
+    )
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def _normalize_database_url(cls, v: str) -> str:
+        """Ensure standard postgres:// or postgresql:// URLs use asyncpg driver."""
+        if v.startswith("postgres://"):
+            return "postgresql+asyncpg://" + v[len("postgres://") :]
+        if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+            return "postgresql+asyncpg://" + v[len("postgresql://") :]
+        return v
 
     # LLM settings and role configuration
     llm: LLMConfig = Field(default_factory=LLMConfig)

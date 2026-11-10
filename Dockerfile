@@ -58,22 +58,23 @@ COPY --chown=appuser:appgroup configs/ /app/configs/
 COPY --chown=appuser:appgroup pyproject.toml /app/pyproject.toml
 
 # Set environment variables for the runtime application
+# Default PORT is 10000 (Render default); overridden dynamically by Cloud or Docker Compose
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8000 \
+    PORT=10000 \
     ENVIRONMENT=production
 
-# Expose HTTP port
-EXPOSE 8000
+# Expose default HTTP port
+EXPOSE 10000
 
-# Container healthcheck querying /healthz endpoint
+# Container healthcheck querying /healthz endpoint using dynamic $PORT
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/healthz || exit 1
+    CMD sh -c "curl -f http://localhost:${PORT:-10000}/healthz || exit 1"
 
 # Run as non-root user
 USER appuser
 
-# Default command starts the FastAPI application via uvicorn
-CMD ["uvicorn", "copilot.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command starts the FastAPI application via uvicorn with shell execution to expand $PORT
+CMD ["sh", "-c", "exec uvicorn copilot.api.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
 
