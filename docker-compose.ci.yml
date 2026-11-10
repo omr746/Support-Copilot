@@ -1,0 +1,58 @@
+# docker-compose.ci.yml — CI automated test orchestration
+name: support-copilot-ci
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: support-copilot:ci
+    container_name: support-copilot-ci-app
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - ENVIRONMENT=test
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-copilot}:${POSTGRES_PASSWORD:-ci_test_password}@postgres:5432/${POSTGRES_DB:-copilot}
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: support-copilot-ci-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-copilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ci_test_password}
+      POSTGRES_DB: ${POSTGRES_DB:-copilot}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_ci_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-copilot} -d ${POSTGRES_DB:-copilot}"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: support-copilot-ci-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_ci_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+volumes:
+  postgres_ci_data:
+  redis_ci_data:
+

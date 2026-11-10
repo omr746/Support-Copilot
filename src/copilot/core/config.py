@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -136,7 +136,10 @@ class AppConfig(BaseSettings):
         extra="ignore",
     )
 
-    environment: str = "development"
+    environment: str = Field(
+        default="development",
+        validation_alias=AliasChoices("environment", "ENVIRONMENT", "APP_ENV", "app_env"),
+    )
     app_jwt_secret: str = "dev-secret-change-in-prod"
     crawl_contact: str = ""
 

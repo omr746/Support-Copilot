@@ -369,6 +369,37 @@ Numbers:
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
 
+## 2026-11-10 · Session 11: Docker, compose core profile, and container verification (Step 1.8)
+
+Did:
+- Step 1.8: Built multi-stage Dockerfile, core docker-compose profile, and container verification pipeline:
+  - `Dockerfile`: Multi-stage build (`builder` using `ghcr.io/astral-sh/uv:0.5.29`, `runtime` using `python:3.12-slim`). Installs `ffmpeg` (audio normalization) and `curl` (healthchecks), configures non-root user `appuser` (UID/GID 10001), establishes `HEALTHCHECK` targeting `/healthz`, and starts uvicorn on port 8000.
+  - `.dockerignore`: Filtered `.git`, `.venv`, `.env`, tests, docs, and build caches to ensure lean, reproducible builds.
+  - `docker-compose.yml`: Declared `core` profile containing `app`, `postgres` (`pgvector/pgvector:pg16`), and `redis` (`redis:7-alpine`) with healthcheck dependencies.
+  - `docker-compose.ci.yml`: Automated CI compose configuration with fast healthcheck intervals.
+  - `scripts/check_docker.sh`: Comprehensive test script verifying Docker build, enforcing image size limit (<= 400 MB), checking container non-root UID, verifying ffmpeg, and probing `/healthz` and `/readyz` endpoints.
+  - `.github/workflows/ci.yml`: Added `docker` job running `scripts/check_docker.sh`.
+  - `.env.example`: Added `COMPOSE_PROFILES=core` and Postgres connection credentials (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`).
+  - `src/copilot/core/config.py`: Added `AliasChoices` for `environment` supporting both `ENVIRONMENT` and `APP_ENV` seamlessly, and updated `Dockerfile` to use `ENVIRONMENT=production`.
+  - `docker-compose.yml`: Removed hardcoded Postgres credentials; used `${POSTGRES_PASSWORD}` environment variable interpolation with `.env` file management.
+  - `tests/unit/test_docker.py`: Added 9 unit tests verifying Dockerfile structure, non-root user, ffmpeg, healthcheck, `.dockerignore`, docker-compose core profile configurations, and credential interpolation.
+
+Broke:
+- No test failures.
+
+Fixed:
+- Ensured non-root execution (UID 10001) and tight image size constraint (<= 400 MB) preventing bloat on free hosting tiers (e.g. Render).
+- Configured healthcheck probes on all dependent services (`pgvector` via `pg_isready`, `redis` via `redis-cli ping`) so `app` only starts when dependencies are healthy.
+- Eliminated hardcoded database passwords in `docker-compose.yml` to prevent secret leakage in git.
+- Unified environment variable naming (`ENVIRONMENT` / `APP_ENV`) between Dockerfile, compose, and Pydantic AppConfig.
+
+Numbers:
+- 196 test items collected: 191 passed offline tests (+9 new unit tests in `tests/unit/test_docker.py`), 5 live tests deselected by default.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
+
 
 
 

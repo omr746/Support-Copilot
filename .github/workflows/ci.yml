@@ -46,3 +46,15 @@ jobs:
 
       - name: Unit tests (live tests are excluded)
         run: uv run pytest tests/unit -q -m "not live"
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Run Docker and Docker Compose verification
+        run: bash scripts/check_docker.sh

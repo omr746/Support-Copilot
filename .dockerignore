@@ -1,0 +1,44 @@
+# Git and repository metadata
+.git
+.github
+
+# Virtual environment and python bytecode
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Testing & quality tooling caches
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.importlinter
+.coverage
+htmlcov
+
+# Documentation & temporary data
+data/private
+data/snapshots
+docs
+evals
+prompts
+tests
+
+# Secrets and local environments
+.env
+.env.*
+!.env.example
+
+# Editor and system artifacts
+.idea
+.vscode
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
