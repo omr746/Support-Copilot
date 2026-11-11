@@ -1,6 +1,8 @@
 # Support Copilot: Step-by-Step Execution Plan
 
-*Version 0.1 · October 30, 2026 · Companion to the PRD · 8 weeks*
+*Version 0.2 · November 11, 2026 · Companion to the PRD · 8 weeks (Week 2 is split into 2A and 2B)*
+
+**Change in v0.2:** Week 2 is rewritten for professional, idempotent RAG from crawl to answer. New step 2.3b (incremental ingestion), a pipeline fingerprint, a content hash on cleaned text, a snapshot-to-page-version schema, ingestion metrics and spans, retrieval-stage tracing, deeper evals with a reproducibility record, and step 2.13 (judge calibration). This satisfies FR-RAG-4.
 
 ## How to use this plan
 
@@ -31,6 +33,8 @@ LLMOps manages the prompts, models, evaluations and cost of the LLM application.
 | --- | --- | --- | --- |
 | Prompt versioning | Prompts live in versioned files, and every trace records the prompt id and hash | Git (Langfuse prompt management is optional; check plan limits) | 2.11 |
 | Dataset versioning | Eval sets, ASR audio and the corpus have versions and checksums | Git, plus DVC or Git LFS for large files | 2.12 |
+| Pipeline fingerprint | Every page version and chunk records the cleaner, normalizer, chunker and embedder versions, so a change reprocesses only what it affects | Postgres | 2.1 to 2.3b |
+| Judge calibration | The LLM judge is checked against a small human-labeled sample before its numbers are trusted | Git, a small script | 2.13 |
 | Red-team regression | Every attack and incident becomes a permanent test case | pytest | 3.8 |
 | Experiment tracking | Each eval or training run is recorded as a Langfuse experiment run, with code, data, prompt and model versions and its scores | Langfuse datasets and experiment runs | 5.7 |
 | Model registry | Each role has a pinned model id approved by a named eval run; local models are versioned with a model card | A lock file in Git, plus Hugging Face Hub or Git LFS for local model files | 5.8 |
@@ -48,7 +52,7 @@ The knowledge base has three source types. The built-in WE customer-service page
 
 | Source | Who adds it | Who can see it | Steps |
 | --- | --- | --- | --- |
-| Built-in WE pages (te.eg) | You, with the crawl command | Every visitor, read-only | 2.0a to 2.0c, 2.5a, 7.11 |
+| Built-in WE pages (te.eg) | You, with the crawl command | Every visitor, read-only | 2.0a to 2.0c, 2.3b, 2.5a, 7.11 |
 | User files | Each visitor | Only that visitor | 3.9 to 3.11, 3.14 |
 | User websites | Each visitor (feature flag, off by default in the public demo) | Only that visitor | 3.12, 3.13, 3.14 |
 
@@ -134,67 +138,117 @@ Set a budget alert in Billing right away. Done when a public URL returns ok on /
 
 **Record in LOG.md:** the public URL, a screenshot of green CI, and every problem you hit during the first deploy.
 
-## Week 2: RAG
+## Week 2: RAG (professional, idempotent, observable)
 
-Goal: grounded answers with citations, and your first measured baseline.
+Goal: grounded answers with citations over the built-in WE snapshot, where re-running ingestion does nothing when nothing changed, every stage is observable, and every number you measure can be reproduced. This week has about 25 steps, so treat it as two weeks.
+
+- **Week 2A (ingest and answer):** 2.0a, 2.0b, 2.0c, 2.1, 2.2, 2.3, 2.3b, 2.4, 2.5, 2.5a. Exit: a cited answer from the real snapshot and a passing "run it twice" test.
+- **Week 2B (measure and operate):** 2.6 to 2.13. Exit: baseline numbers with a before/after, a dashboard, a trace and a CI gate.
+- If time is short, move 2.11 and 2.12 to the start of Week 3. Never cut 2.3b, 2.7, 2.8 or 2.9.
+
+**Design rules for this week**
+
+1. **Identity by content.** A page version is identified by the hash of its cleaned main text. A chunk is identified by the hash of its normalized text plus its section path.
+2. **Pipeline fingerprint.** Every page version and chunk records a fingerprint: a hash of the cleaner version, normalizer version, chunker settings, embedder id and embedder dimension. If the fingerprint changes, affected items are reprocessed. If not, they are skipped.
+3. **Snapshots are views.** A snapshot is a list of page-version ids. Chunks belong to a page version. Unchanged pages are shared between snapshots, so nothing is duplicated.
+4. **Everything is an upsert.** Every write uses a unique key, so running a job twice or resuming a killed job cannot create duplicates.
+5. **Every stage emits a metric and a span** with bounded labels (source type, outcome). Never user, session or request ids as labels.
 
 **2.0a Crawl rules and polite client.** Create configs/crawl.yaml with the start URLs (https://www.te.eg/we is your starting point; confirm the exact customer-service URLs by hand), the allowed host and path prefixes, denied patterns (login, account, payment, forms, query strings), the languages (ar and en), a page cap, a delay between requests, and a User-Agent that names the project. The contact address in the User-Agent comes from an environment variable (CRAWL\_CONTACT), never from a file in the public repository. First read the site's robots.txt and terms of use in a browser and note the result in LOG.md. If automated access is not allowed, stop and use pages you save by hand. Then write the robots.txt check (Python's urllib.robotparser works) and a polite HTTP client: one connection, a delay, timeouts, retries with backoff, conditional requests (ETag and Last-Modified), and a stop after repeated 403 or 429 answers. A missing robots.txt (404) allows crawling. A robots.txt that cannot be fetched (5xx or a network error) means do not crawl.
 
 **Tests:** everything runs against a local fake HTTP server, never the real site. Robots rules: allowed, disallowed, crawl-delay, 404 allows, 5xx blocks. The allowlist rejects other hosts and denied patterns. URLs are normalized (fragments and tracking parameters removed). A fake clock proves the delay between requests. The client stops after repeated 429 or 403 answers, treats a 304 as unchanged, and always sends the User-Agent. The command refuses to run without CRAWL\_CONTACT.
 
-**2.0b Fetch, clean, store and snapshot.** Fetch only allowed pages and extract the main text (drop navigation, footers and scripts; keep headings, lists and tables as text) with an HTML-to-text library that installs on Python 3.12 and handles Arabic. Detect the page language. Store each page with URL, canonical URL, title, language, fetched-at time, HTTP status and content hash. Every crawl creates a snapshot id (the date plus a short hash). Snapshots never change: unchanged pages (same hash) are reused, changed pages get a new version, and removed pages are marked removed. The active snapshot is a config value, and rollback means switching it back. Commit only a manifest per snapshot (data/snapshots/\<id>/manifest.jsonl with URL, time, language and hash, no page text). Page text lives in the database and in a private backup under data/private/ (git-ignored), because the content belongs to the website owner. Decide where the private backup is kept so the nightly job in step 5.6 can load it. Pages that look empty without JavaScript are recorded as needs\_js and not indexed.
+**2.0b Fetch, clean, store and snapshot.** Fetch only allowed pages and extract the main text (drop navigation, footers and scripts; keep headings, lists and tables as text) with an HTML-to-text library that installs on Python 3.12 and handles Arabic. Detect the page language. Pages that look empty without JavaScript are recorded as needs\_js and not indexed.
 
-**Tests:** with fixture HTML files (Arabic, English, mixed, with navigation, footer and script tags): the main text is kept and the boilerplate removed, Arabic text and digits survive, and the same page gives the same hash. Two pages with the same canonical URL are stored once. A JavaScript-only shell is flagged needs\_js. A 404 is recorded without content. An unchanged page is not re-embedded and a changed page is. A removed page is marked removed. Switching and rolling back the active snapshot changes what retrieval reads. The manifest has no text field (the test checks its keys).
+*Content hash rule:* hash the cleaned main text after whitespace normalization, never the raw HTML. Keep the response ETag and Last-Modified separately, only for conditional requests. Record the cleaner version with every page version.
 
-**2.0c Crawl command and report.** Add python -m copilot.rag.crawl --config configs/crawl.yaml as a separate command (not part of the web server), with a dry-run mode that only lists the URLs it would fetch, a resume option, and a summary report: fetched, unchanged, changed, removed, failed, blocked by robots.txt, needs\_js. Add crawl metrics (pages by outcome, snapshot age). Scheduling comes in step 7.11.
+Store each page version with URL, canonical URL, title, language, fetched-at time, HTTP status, content hash and cleaner version. Every crawl creates a snapshot id (the date plus a short hash). Snapshots never change: unchanged pages (same content hash) reuse the existing page version, changed pages get a new version, and removed pages are marked removed in the new snapshot only. The active snapshot is a config value, and rollback means switching it back. Commit only a manifest per snapshot (data/snapshots/\<id>/manifest.jsonl with URL, time, language and hash, no page text). Page text lives in the database and in a private backup under data/private/ (git-ignored), because the content belongs to the website owner. Decide where the private backup is kept so the nightly job in step 5.6 can load it.
 
-**Tests:** a dry run makes no network calls and writes nothing. A resume continues after an interruption without duplicates. The summary counts match a fake server with known pages. The exit code is non-zero when the failure rate is above a threshold.
+**Tests:** with fixture HTML files (Arabic, English, mixed, with navigation, footer and script tags): the main text is kept and the boilerplate removed, Arabic text and digits survive, and the same page gives the same hash on every run. A page whose only change is a timestamp, banner, tracking token or footer keeps the same hash. A real text change gives a different hash. Two pages with the same canonical URL are stored once. A JavaScript-only shell is flagged needs\_js. A 404 is recorded without content. A removed page is marked removed in the new snapshot only. Switching and rolling back the active snapshot changes what retrieval reads. The manifest has no text field (the test checks its keys).
 
-**2.1 Ingestion.** Read pages from the active snapshot (and later uploads and user websites) and chunk them by headings (start with 500 to 800 tokens and some overlap). Normalize Arabic text before chunking (diacritics, alef, yaa and taa marbuta variants, Arabic-Indic digits) and keep both the original and the normalized text, so users always see the original. Keep metadata: source type (builtin, upload or website), owner id (empty for built-in), source id, URL or filename, title, section, language, snapshot id and fetched-at time.
+**2.0c Crawl command and report.** Add python -m copilot.rag.crawl --config configs/crawl.yaml as a separate command (not part of the web server), with a dry-run mode that only lists the URLs it would fetch, a resume option, and a summary report: fetched, unchanged, changed, removed, failed, blocked by robots.txt, needs\_js. Add crawl metrics (pages by outcome, crawl duration, snapshot age), one span per crawl run, and one structured log line per page (host and path hash, never the query string). Scheduling comes in step 7.11.
 
-**Tests:** no chunk exceeds the token limit, overlap is respected, metadata is kept (source type, owner, language, snapshot), Arabic and English text both work, normalization changes the search text but never the text shown to the user, an empty document is handled, a short section is not split across a heading, and the same input always gives the same chunk ids.
+**Tests:** a dry run makes no network calls and writes nothing. A resume continues after an interruption without duplicates. The summary counts match a fake server with known pages. The exit code is non-zero when the failure rate is above a threshold. Running the crawl twice against an unchanged fake server reports everything as unchanged and creates no new page versions.
 
-**2.2 Embeddings.** Put an Embedder port in front of a small multilingual CPU model that handles Arabic, English and cross-language search (fastembed or sentence-transformers CPU build; check the size and license on the model card). Gemini embeddings can be a second provider.
+**2.1 Normalization, chunking and fingerprint.** Chunk by headings (start with 500 to 800 tokens and some overlap). Normalize Arabic text before chunking (diacritics, alef, yaa and taa marbuta variants, Arabic-Indic digits) and keep both the original and the normalized text, so users always see the original. Keep metadata: source type (builtin, upload or website), owner id (empty for built-in), source id, page version id, URL or filename, title, section path, language, fetched-at time, a chunk content hash (normalized text plus section path) and the fingerprint parts (normalizer version, chunker settings). Chunk ids are deterministic: derived from the page version id, section path and chunk index.
 
-**Tests:** an Embedder contract suite: the output dimension matches the config, the same text gives the same vector, a batch equals single calls. A sanity test checks that a paraphrase scores higher than an unrelated sentence, in Arabic, in English and across languages (an Arabic question against English text). Use a FakeEmbedder everywhere else.
+**Tests:** no chunk exceeds the token limit, overlap is respected, metadata is kept (source type, owner, language, page version), Arabic and English text both work, normalization changes the search text but never the text shown to the user, an empty document is handled, and a short section is not split across a heading. The same input always gives the same chunk ids and chunk hashes. Changing one sentence changes the hash of the chunk that contains it (and at most its overlap neighbor), and no others. Changing the chunker settings or the normalizer version changes the fingerprint.
 
-**2.3 Database.** Write an Alembic migration for the tables snapshots, pages, sources, jobs and chunks (with source type, owner id, language and snapshot id), a pgvector column and a full-text search column. Check which text-search configuration your Postgres offers for Arabic. If none fits, use the 'simple' configuration on normalized text, and measure the choice in step 2.4.
+**2.2 Embeddings.** Put an Embedder port in front of a small multilingual CPU model that handles Arabic, English and cross-language search (fastembed or sentence-transformers CPU build; check the size and license on the model card). Gemini embeddings can be a second provider. The port exposes model\_id, dimension and a fingerprint string, so the pipeline fingerprint never depends on provider details.
 
-**Tests:** an integration test against the CI Postgres: the migration runs up and down, constraints hold, the vector column has the right dimension, a full-text query returns the expected row, and an Arabic query finds an Arabic row after normalization.
+**Tests:** an Embedder contract suite: the output dimension matches the config, the same text gives the same vector, a batch equals single calls. A sanity test checks that a paraphrase scores higher than an unrelated sentence, in Arabic, in English and across languages (an Arabic question against English text). FakeEmbedder counts its calls (step 2.3b needs this) and is used everywhere else.
 
-**2.4 Retrieval.** Combine vector search and keyword search (reciprocal rank fusion), then rerank with a small cross-encoder if your machine allows it. Every query searches the active built-in snapshot plus the caller's own sources and nothing else.
+**2.3 Database.** Write an Alembic migration. Snapshots point to page versions, and chunks belong to page versions, so unchanged pages are never duplicated.
 
-**Tests:** use a tiny fixture corpus of about 10 documents with designed queries. Vector-only, keyword-only and hybrid search each return the expected top result. Unit-test the fusion with known rankings, check that the reranker reorders a known pair, that k is respected, that an empty result is handled, that one user's chunks are never returned to another user, and that chunks from a non-active snapshot are never returned.
+- snapshots: id, created\_at, status, gate\_report\_id.
+- page\_versions: id, canonical\_url, content\_hash, cleaner\_version, language, title, fetched\_at, text, status.
+- snapshot\_pages: snapshot\_id, page\_version\_id, state (present or removed).
+- sources: id, type, owner\_id, name, checksum, status, quota counters.
+- chunks: id, page\_version\_id or source\_id, owner\_id, source\_type, section\_path, language, text, normalized\_text, chunk\_hash, pipeline\_fingerprint, a pgvector column, a full-text search column and tombstoned\_at.
+- embedding\_cache: chunk\_hash, embedder fingerprint, vector, so identical chunks are never embedded twice.
+- jobs: id, type, source\_id, status, reason, started\_at, finished\_at, counters as JSON.
 
-**2.5 Answering.** Send only the top 3 to 4 chunks to the model, require citations, and add a clear “not found” path. Small contexts protect your rate limits.
+Unique keys: (canonical\_url, content\_hash) on page versions, (page\_version\_id, chunk\_index, pipeline\_fingerprint) on chunks, and (chunk\_hash, embedder fingerprint) on the cache. Add a Postgres advisory-lock helper for single-job execution. Check which text-search configuration your Postgres offers for Arabic. If none fits, use the 'simple' configuration on normalized text, and measure the choice in step 2.7.
 
-**Tests:** with FakeLLM: the prompt holds at most the allowed number of chunks, each with its id. With no evidence the answer is the not-found message. Every citation maps to a chunk that was actually retrieved, so no source is invented.
+**Tests:** an integration test against the CI Postgres: the migration runs up and down, constraints hold, the vector column has the right dimension, a full-text query returns the expected row, and an Arabic query finds an Arabic row after normalization. Inserting the same page version or chunk twice hits the unique key, and the upsert helper handles it cleanly. Two snapshots that share an unchanged page share the same chunk rows (count them).
+
+**2.3b Incremental ingestion (new).** Ingestion reads the pages of the target snapshot and brings the chunk store up to date. For each page version:
+
+1. If its chunks already exist with the current pipeline fingerprint, skip it.
+2. Otherwise re-chunk it and compute the chunk hashes.
+3. For each chunk, look up embedding\_cache by (chunk hash, embedder fingerprint). Embed only the misses.
+4. Upsert the chunks and cache rows in one transaction per page version.
+5. Tombstone the chunks of pages removed in the target snapshot, and chunks left over from older versions of a changed page that no active snapshot references.
+
+Run it as a background job (not in the web process), one at a time under the advisory lock, with a stored status and counters: pages skipped, pages processed, chunks created, chunks reused, chunks embedded and chunks tombstoned. Later, uploads and user websites use the same ingestion path.
+
+**Tests:** *run it twice:* the second run writes zero rows, makes zero embedder calls (assert on FakeEmbedder) and produces identical chunk ids. Change one page: only that page is reprocessed, and if one sentence changed, only the affected chunks are embedded. Change only boilerplate (header, footer, timestamp): nothing is reprocessed. Change the chunker settings, normalizer version or embedder id: everything is reprocessed, and old-fingerprint chunks are never returned by retrieval. Kill the job mid-run (raise an exception after N pages) and rerun: no duplicates, and the final state equals a clean uninterrupted run. Two jobs started at once: the second waits or exits cleanly because of the lock. A removed page's chunks never appear in retrieval (not just a flag on the page). A failed embed call for one page rolls back that page only, marks it failed with a reason, and the job continues. The counters in the job record match the rows actually written.
+
+**2.4 Retrieval.** Combine vector search and keyword search (reciprocal rank fusion), then rerank with a small cross-encoder if your machine allows it. Every query searches the active built-in snapshot (chunks reachable through its page versions, current fingerprint, not tombstoned) plus the caller's own sources and nothing else. Expose each stage separately (vector, keyword, fuse, rerank) so each can be traced and evaluated on its own.
+
+**Tests:** use a tiny fixture corpus of about 10 documents with designed queries. Vector-only, keyword-only and hybrid search each return the expected top result. Unit-test the fusion with known rankings, check that the reranker reorders a known pair, that k is respected, and that an empty result is handled. One user's chunks are never returned to another user. Chunks from a non-active snapshot, tombstoned chunks and old-fingerprint chunks are never returned. Each stage returns chunk ids with scores in a structure the tracing code can record.
+
+**2.5 Answering.** Send only the top 3 to 4 chunks to the model, require citations, and add a clear "not found" path. Small contexts protect your rate limits. Wrap retrieved text as untrusted data in the prompt. Load the answer prompt from the registry once step 2.11 exists; until then keep it in one file with a version constant.
+
+**Tests:** with FakeLLM: the prompt holds at most the allowed number of chunks, each with its id. With no evidence the answer is the not-found message. Every citation maps to a chunk that was actually retrieved, so no source is invented. Retrieved text appears inside the untrusted-data wrapper.
 
 **2.5a Source labels, freshness and disclaimer.** Each citation shows where it came from: a built-in page (URL and fetched-at date), your file (filename) or your website (URL and fetched-at date). Pages older than a configured age get a note that the information may be out of date, with a link to the official site. Built-in answers state that this is an unofficial assistant, not affiliated with Telecom Egypt or WE, and the UI uses no WE logos. The not-found message points to the official site (the link comes from config).
 
 **Tests:** citations contain the source label and the date; a page older than the limit (with a fake clock) adds the note; the disclaimer is present in the API response and in the UI for built-in answers; the not-found message contains the configured link.
 
-**2.6 Golden set.** Write the questions yourself from the crawled pages, starting with 30 and growing to 100: about half in Arabic and half in English, including cross-language pairs. For each, store the expected source URL, the snapshot id and your own short notes on the expected answer (do not copy page text into the repository). Mark questions about prices and offers as volatile, because they change when the site changes. Add 20 adversarial cases (injection, out of scope, ambiguous). Store them in data/eval/llm/v1/ with a dataset card.
+**2.6 Golden set.** Write the questions yourself from the crawled pages, starting with 30 and growing to 100: about half in Arabic and half in English, including cross-language pairs. For each, store the expected source URL, the snapshot id and your own short notes on the expected answer (do not copy page text into the repository). Tag each question with a type (factual, procedural, cross-language, volatile, adversarial) so results can be broken down. Mark questions about prices and offers as volatile, because they change when the site changes. Add 20 adversarial cases (injection, out of scope, ambiguous, unanswerable). Store them in data/eval/llm/v1/ with a dataset card.
 
 **Tests:** write a dataset validator script and run it in CI: every question has a unique id and tags, each expected source URL exists in the manifest of the named snapshot, and the checksum matches the dataset card.
 
-**2.7 First evaluation.** Measure recall@5, MRR and faithfulness (use the judge role, a different model from the one being tested). Done when baseline numbers are in LOG.md. Then change one thing (chunk size or hybrid search), re-measure, and keep the before and after.
+**2.7 Evaluation.** Use the judge role, a different model from the one being tested. Measure:
 
-**Tests:** check recall@k and MRR against hand-computed values on three toy examples. The judge output must parse as JSON, and a malformed judge reply (from FakeLLM) is handled without crashing. Two runs with the same settings give scores within a tolerance.
+- Retrieval: recall@5, MRR and hit rate at k = 1, 3 and 5.
+- Answers: faithfulness, answer relevance, citation accuracy (the cited chunk really supports the claim) and correct-refusal rate on adversarial and unanswerable questions.
+- An ablation table: vector-only, keyword-only, hybrid and hybrid plus rerank, each reported separately and split by language. This table justifies your Arabic keyword-search choice from step 2.3.
+- A breakdown by question type and by language.
 
-**2.8 Metrics and first dashboard.** Expose Prometheus metrics, start the observability compose profile, build an Overview dashboard, and export its JSON into ops/grafana.
+*Reproducibility record:* write every eval report as JSON and Markdown, including the snapshot id, dataset version and checksum, pipeline fingerprint and its parts, k values, prompt ids and hashes, model ids per role, judge model id, git SHA and run time. Plain JSON now; Langfuse experiments (5.7) and the lock file (5.8) build on it later.
 
-**Tests:** after one request, /metrics contains the expected metric names. A test fails if any label is user\_id, session\_id or request\_id. The dashboard JSON parses and contains the required panels.
+Done when baseline numbers are in LOG.md. Then change one thing (chunk size or hybrid search), re-measure, and keep the before and after.
 
-**2.9 Tracing v1.** Add OpenTelemetry with Langfuse export. Done when one full request trace is visible in Langfuse.
+**Tests:** check recall@k and MRR against hand-computed values on three toy examples. The judge output must parse as JSON, and a malformed judge reply (from FakeLLM) is handled without crashing. Two runs with the same settings give scores within a tolerance. The report schema requires every reproducibility field, and the eval refuses to run if the dataset checksum does not match its card. Changing the pipeline fingerprint changes the fingerprint field in the report.
 
-**Tests:** with an in-memory span exporter, one /ask produces the expected span names, parent-child structure and attributes (provider, model, tokens). Redaction is applied to span attributes, and errors are always kept by sampling.
+**2.8 Metrics and first dashboard.** Expose Prometheus metrics, start the observability compose profile, build an Overview dashboard plus an Ingestion and RAG panel group, and export the JSON into ops/grafana. Labels are limited to source type and outcome.
 
-**2.10 CI eval gate.** Run a 20-question subset in CI against a small hand-written fixture corpus (tests/fixtures/corpus/), never the live site and never the private snapshot, with thresholds stored in a YAML file. The full golden set runs locally and nightly against the real snapshot.
+- Ingestion and crawl: pages by outcome (fetched, unchanged, changed, removed, failed, blocked, needs\_js), chunks created, reused, embedded and tombstoned, embedder calls and latency, embedding-cache hit ratio, ingestion job duration and outcome, snapshot age, total stored bytes.
+- RAG: retrieval latency by stage, top retrieval score distribution, no-answer rate, chunks sent to the LLM, tokens and estimated cost per request.
+
+**Tests:** after one request, /metrics contains the expected metric names. A test fails if any label is user\_id, session\_id or request\_id. After running step 2.3b twice, the counters show chunks embedded on the first run and zero on the second. The dashboard JSON parses and contains the required panels.
+
+**2.9 Tracing v1.** Add OpenTelemetry with Langfuse export. One /ask trace shows these spans in order: retrieval with child spans vector\_search, keyword\_search, fusion and rerank, then prompt\_build, llm\_answer and citation\_check. Record these attributes: for retrieval, k, the chunk ids with scores per stage, the snapshot id and the pipeline fingerprint; for the LLM, provider, model, prompt id and hash, token counts and estimated cost. Add a span per ingestion job and per page processed, with counters (skipped, embedded, reused) as attributes. Never record message text or page text on spans at INFO; use ids, lengths and hashes. Done when one full request trace is visible in Langfuse.
+
+**Tests:** with an in-memory span exporter, one /ask produces the expected span names, parent-child structure and attributes (provider, model, tokens). Retrieval spans carry chunk ids and scores but no text. Redaction is applied to span attributes, and errors are always kept by sampling. An ingestion job produces job and per-page spans with correct counters.
+
+**2.10 CI eval gate.** Run a 20-question subset in CI against a small hand-written fixture corpus (tests/fixtures/corpus/), never the live site and never the private snapshot, with thresholds stored in a YAML file (start at recall@5 of 0.80 and faithfulness of 0.85, then revise after your baseline). The idempotency test from step 2.3b also runs in the CI integration job. The full golden set runs locally and nightly against the real snapshot.
 
 **Tests:** test the gate itself: a report below the threshold must exit non-zero and one at or above must exit zero. Validate the thresholds file against a schema.
 
-**2.11 Prompt registry.** Move every prompt into prompts/\<name>/vN.md with a short header (purpose, model role, inputs). A loader returns the text, the version and a sha256 hash. Every trace records the prompt id and hash, and a prompt change goes through a pull request that shows the eval before and after.
+**2.11 Prompt registry.** Move every prompt into prompts/\<name>/vN.md with a short header (purpose, model role, inputs). A loader returns the text, the version and a sha256 hash. Every trace and every eval report records the prompt id and hash, and a prompt change goes through a pull request that shows the eval before and after.
 
 **Tests:** the loader returns the requested version and fails clearly on a missing one; the hash changes when the text changes; an in-memory exporter shows prompt\_id on the LLM span; a lint check fails if an LLM call uses a prompt string that is not from the registry; the CI eval job runs whenever files under prompts/ change.
 
@@ -202,7 +256,13 @@ Goal: grounded answers with citations, and your first measured baseline.
 
 **Tests:** an eval refuses to run if the dataset checksum does not match its card; CI fails when a dataset file changes without a version bump; the report schema requires dataset\_version.
 
-**Record:** a before/after table and a Langfuse trace screenshot.
+**2.13 Judge calibration (new).** After the first baseline, hand-label 30 to 40 answers (faithful or not, relevant or not, citation correct or not) and compare them with the judge's scores. Record the agreement in LOG.md. Use a low temperature and, for borderline items, repeat the judge call and take the majority. If agreement is weak, change the judge prompt (through the registry) or the judge model before you trust any number.
+
+**Tests:** the agreement function is correct on hand-built examples; the labeled sample is stored as a versioned dataset with a card; the calibration script reports agreement and fails below the minimum you set.
+
+**Done when:** ingesting the same snapshot twice writes nothing and makes zero embedder calls (proven by an automated test); changing one page re-embeds only its changed chunks, and changing the chunker or embedder reprocesses everything; killing and resuming ingestion leaves no duplicates; baseline recall@5, MRR, faithfulness, citation accuracy and correct-refusal rate are in LOG.md with the ablation table split by language; judge agreement with your human labels is recorded; a dashboard shows ingestion and RAG metrics; one /ask trace in Langfuse shows every retrieval stage with chunk ids and scores; and CI runs the fixture eval gate and the idempotency test.
+
+**Record in LOG.md:** the baseline and after numbers, the ablation table, tokens and cost per request, chunks embedded on the first versus second ingestion run, which Arabic keyword method you chose and why, a Langfuse trace screenshot and a dashboard screenshot.
 
 ## Week 3: Agent
 
@@ -244,7 +304,7 @@ Goal: an agent that takes real actions safely.
 
 **Tests:** a new visitor gets a token and an id different from other visitors; the same cookie returns the same id; a tampered, expired or unsigned token never grants access to another visitor's sources (the visitor gets a new identity); the secret comes from the environment and the app refuses to start in production without it; the cookie is HttpOnly, and Secure outside local development; the rate limit returns 429 after the limit.
 
-**3.10 File uploads.** Add POST /files, GET /files and DELETE /files/{id}. Accept .txt, .md and .pdf (add more types only if you need them) within starting limits of 2 MB per file, 50 PDF pages, 5 files and a fixed total number of chunks per user; tune them against your free database size. Check the type by content (magic bytes), not only the extension. Extract text only (no OCR, no scripts), normalize it, chunk it and embed it as a background job with a status: queued, running, ready, or failed with a reason. Store text and chunks in Postgres with owner id, source id and checksum. Never write the file to the container disk.
+**3.10 File uploads.** Add POST /files, GET /files and DELETE /files/{id}. Accept .txt, .md and .pdf (add more types only if you need them) within starting limits of 2 MB per file, 50 PDF pages, 5 files and a fixed total number of chunks per user; tune them against your free database size. Check the type by content (magic bytes), not only the extension. Extract text only (no OCR, no scripts), normalize it, chunk it and embed it as a background job through the same incremental ingestion path as step 2.3b (same fingerprint, same embedding cache, same job lock), with a status: queued, running, ready, or failed with a reason. Store text and chunks in Postgres with owner id, source id and checksum. Never write the file to the container disk.
 
 **Tests:** a wrong extension, wrong content, empty file, oversize file, too many pages and an over-quota upload are rejected with a clear 4xx message; a duplicate checksum does nothing; deleting a source removes its chunks and embeddings; text is extracted from sample .txt, .md, English PDF and Arabic PDF fixtures; a corrupt PDF returns 422 and the job is marked failed with a reason; no file remains on disk after a request (list the temp folder); extracted text is not written to logs at INFO.
 
@@ -256,7 +316,7 @@ Goal: an agent that takes real actions safely.
 
 **Tests:** a table of blocked targets: localhost, 127.0.0.1, 0.0.0.0, 10.x, 172.16.x, 192.168.x, 169.254.169.254, ::1, fc00::, fe80::, ::ffff:127.0.0.1, the decimal, hex and octal forms of 127.0.0.1, a name that resolves to a private address (fake resolver), a name whose address changes between two lookups (rebinding), a redirect to a private address, credentials in the URL, ports other than 80 and 443, and the file://, ftp:// and gopher:// schemes. Public targets pass. The 4th redirect fails. An oversize body is cut off and rejected, a disallowed content type is rejected, and no Cookie or Authorization header is ever sent. These tests use a fake resolver and a local server, never real internet targets.
 
-**3.13 User websites.** Add POST /sources/websites with a URL, plus list, refresh and delete endpoints. The default is one page. An optional small crawl stays on the same host and is limited to starting values of 20 pages and depth 1. Pages that need login or JavaScript are reported as such and not added. Keep query strings out of logs and traces (log the host and a hash of the path). Show the user a notice that they must have the right to index the content. The whole feature sits behind a feature flag, off in the public demo until the tests of steps 3.12 and 3.13 pass and you decide (PRD question Q9). Add per-user and per-IP limits, a global daily cap on fetches, and a kill switch. Ingestion runs as a background job with a status, like uploads.
+**3.13 User websites.** Add POST /sources/websites with a URL, plus list, refresh and delete endpoints. The default is one page. An optional small crawl stays on the same host and is limited to starting values of 20 pages and depth 1. Pages that need login or JavaScript are reported as such and not added. Keep query strings out of logs and traces (log the host and a hash of the path). Show the user a notice that they must have the right to index the content. The whole feature sits behind a feature flag, off in the public demo until the tests of steps 3.12 and 3.13 pass and you decide (PRD question Q9). Add per-user and per-IP limits, a global daily cap on fetches, and a kill switch. Ingestion runs as a background job with a status, like uploads, through the same incremental ingestion path.
 
 **Tests:** with a local fake website: one page is ingested and cited as your website; the crawl respects the page cap, the depth and the same-host rule; a robots.txt disallow is obeyed; a login page and a JavaScript-only page are reported and not added; refresh skips unchanged pages by hash; query strings never appear in captured logs; with the flag off the endpoint returns 404 or 403; over-quota and over-cap requests are rejected with 429; the kill switch stops running jobs.
 
@@ -332,7 +392,7 @@ Goal: choose default providers using data, not guesses.
 
 **Tests:** reuse the gate tests from step 2.10, lint the workflow files with actionlint in CI, and dry-run the nightly job with fakes to prove it produces the report artifacts.
 
-**5.7 Experiment tracking.** Use Langfuse for experiment tracking, so there is no extra service to run. Upload the golden set as a Langfuse dataset and run each eval as an experiment run over it. Every run records the git SHA, dataset version, prompt ids, provider, model and parameters as metadata, attaches its metrics as scores, and puts the run name in the report. Watch your monthly unit budget: a full run creates many traces, so keep run-level scores for every run and full traces only for failures, or run the full suite weekly.
+**5.7 Experiment tracking.** Use Langfuse for experiment tracking, so there is no extra service to run. Upload the golden set as a Langfuse dataset and run each eval as an experiment run over it. Every run records the git SHA, dataset version, prompt ids, provider, model and parameters as metadata (the reproducibility record from step 2.7), attaches its metrics as scores, and puts the run name in the report. Watch your monthly unit budget: a full run creates many traces, so keep run-level scores for every run and full traces only for failures, or run the full suite weekly.
 
 **Tests:** a run with FakeASR sends the expected metadata and scores to a mocked Langfuse client; the report contains the run name; if Langfuse is unreachable the eval still finishes and prints a warning; two runs with different prompt versions show different prompt ids; a test checks that a full run stays within the trace budget you set.
 
@@ -366,7 +426,7 @@ Goal: faster, cheaper, and safe under quota limits.
 
 **Tests:** a WebSocket integration test connects, sends audio frames and receives partial and final results. Test voice activity detection on speech and silence fixtures, and check that new speech cancels playback (barge-in).
 
-**6.6 Index versioning.** Store each index with a version that records the embedding model, dimension and chunking settings. Build a new index next to the old one, evaluate it on the golden set, then switch with one config value. Keep the previous index for a week so rollback is instant.
+**6.6 Index versioning.** Store each index with a version that records the embedding model, dimension and chunking settings (this builds on the pipeline fingerprint from steps 2.1 to 2.3b). Build a new index next to the old one, evaluate it on the golden set, then switch with one config value. Keep the previous index for a week so rollback is instant.
 
 **Tests:** retrieval reads only the active version; switching and rolling back change the results as expected on a fixture corpus; vectors of different dimensions can never be mixed in one index; a migration test builds v2 from a fixture and passes the retrieval checks.
 
@@ -424,7 +484,7 @@ Goal: safe releases with rollback and alerts.
 
 **Tests:** with a fake provider listing, a missing pinned model produces an issue payload and a present one produces none; an API failure is logged and does not crash the job; every role in the lock file has at least one fallback.
 
-**7.11 Scheduled re-crawl and snapshot promotion.** Run the built-in crawl on a schedule (weekly to start) and on demand, using whatever the free host allows (a hosting cron job or a scheduled GitHub Actions workflow). A new snapshot becomes active only after the golden-set eval on it passes the gates, with the diff (new, changed and removed pages) attached to the report. Re-validate the golden set against the new manifest, and list the questions whose expected page disappeared for review. Alert when the active snapshot is older than the allowed age.
+**7.11 Scheduled re-crawl and snapshot promotion.** Run the built-in crawl on a schedule (weekly to start) and on demand, using whatever the free host allows (a hosting cron job or a scheduled GitHub Actions workflow). A new snapshot becomes active only after incremental ingestion (step 2.3b) and the golden-set eval on it pass the gates, with the diff (new, changed and removed pages) attached to the report. Re-validate the golden set against the new manifest, and list the questions whose expected page disappeared for review. Alert when the active snapshot is older than the allowed age.
 
 **Tests:** the promotion script refuses to activate a snapshot when the gate fails and activates it when the gate passes; the diff report lists new, changed and removed pages on fixtures; the golden-set validator flags a question whose expected URL is missing from the new manifest; the alert rule for snapshot age passes a promtool test; a dry run of the scheduled job with fakes produces the report.
 
@@ -436,7 +496,7 @@ Goal: safe releases with rollback and alerts.
 
 **Tests:** a script checks that every relative link in the README resolves. A docs test follows the three-step add-a-provider guide with a dummy provider and confirms it passes the contract tests. A script compares the numbers in the README with the latest eval report.
 
-**8.2 ADRs.** Write at least five (for example: provider registry, hybrid retrieval, model tiering, shared rate limiter, evals outside src).
+**8.2 ADRs.** Write at least five (for example: provider registry, hybrid retrieval, model tiering, shared rate limiter, evals outside src). Consider a sixth on idempotent ingestion with a pipeline fingerprint.
 
 **Tests:** the ADR lint from step 0.5 passes on all files, and numbering is sequential.
 
@@ -470,7 +530,7 @@ Goal: safe releases with rollback and alerts.
 
 ## If you are stuck or behind
 
-- **Behind schedule:** cut in this order: user-submitted websites (steps 3.12 and 3.13), P2 items (WebSocket, voice activity detection, semantic cache), then streaming, then Terraform (document the manual setup instead). Never cut evals or observability; they are what make the project stand out.
+- **Behind schedule:** cut in this order: user-submitted websites (steps 3.12 and 3.13), P2 items (WebSocket, voice activity detection, semantic cache), then streaming, then Terraform (document the manual setup instead). In Week 2, move steps 2.11 and 2.12 into Week 3 before cutting anything else. Never cut evals, observability or incremental ingestion (step 2.3b); they are what make the project stand out.
 - **No payment method for cloud:** use a no-card container host, or run locally and show a video. The Docker image stays portable either way.
 - **Machine too slow:** use hosted inference only, run only the core compose profile, and start the observability profile only when you need screenshots.
 - **Quota exhausted:** rely on fallbacks and caches, run full evals at night, use smaller subsets during the day.
@@ -484,6 +544,7 @@ Goal: safe releases with rollback and alerts.
 - How you made adding a new model a one-file change.
 - A voice or dialect problem you measured and solved.
 - How you decided what to cut when time ran short.
+- How you made ingestion idempotent and proved that a second run does nothing (the "run it twice" test).
 
 ## Final deliverables checklist
 
@@ -496,4 +557,4 @@ Goal: safe releases with rollback and alerts.
 - Write-up article
 - v1.0 tag
 
-**MLOps and LLMOps additions:** a screenshot of Langfuse experiment runs, the prompt registry, models.lock.yaml with approving run ids, model cards, the index version history, and a drift and canary dashboard.
+**MLOps and LLMOps additions:** a screenshot of Langfuse experiment runs, the prompt registry, models.lock.yaml with approving run ids, model cards, the index version history, a drift and canary dashboard, and the ingestion dashboard with the first-versus-second-run embedding counts.

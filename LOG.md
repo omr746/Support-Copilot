@@ -399,6 +399,45 @@ Numbers:
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
 
+## 2026-11-11 · Decision: Plan v0.2 and deferral of skeleton deployment (Step 1.10)
+Decision: the plan is upgraded to Version 0.2 and Step 1.10 is deferred:
+- Week 2 is restructured into Week 2A (ingest and answer, Steps 2.0a-2.5a) and Week 2B (measure and operate, Steps 2.6-2.13).
+- New design rules for RAG: identity by content, pipeline fingerprinting, snapshots as immutable views, strict upsert semantics, and stage-level metrics/spans.
+- Step 1.10 (Deploy skeleton to Render) is deferred; proceed directly to Week 2A (Step 2.0a: Crawl rules and polite client).
+
+Reason: I chose to upgrade the plan and defer Step 1.10 for these reasons:
+- Week 1 delivered a complete, locally verifiable, containerized skeleton with multi-stage Dockerfile, docker-compose core profile (pgvector, redis), and smoke tests (scripts/smoke.sh).
+- Deploying an empty skeleton without the RAG knowledge base to a public cloud instance wastes free tier hours and risks sleep timeouts before the retrieval engine exists.
+- Plan v0.2 ensures the RAG pipeline is built with industrial-grade idempotence from day one: new Step 2.3b ("run it twice" test) guarantees that re-running ingestion skips unchanged content, avoiding duplicate chunks and runaway embedding costs.
+
+Consequences for later steps:
+- Proceed directly to Week 2A: Step 2.0a (Crawl rules and polite client) and Step 2.0b (Immutable snapshot).
+- Public cloud deployment on Render will take place when the RAG system and vector store are populated and testable with real knowledge.
+- Ingestion must record a pipeline fingerprint (cleaner, normalizer, chunker, embedder versions) in Postgres.
+
+## 2026-11-11 · Session 12: Plan v0.2 adoption and transition to Week 2A (RAG)
+
+Did:
+- Reviewed and adopted Plan Version 0.2:
+  - Week 2 split into Week 2A (ingest & answer: Steps 2.0a to 2.5a) and Week 2B (measure & operate: Steps 2.6 to 2.13).
+  - Adopted RAG design rules: content-hash identity, pipeline fingerprint, snapshots as views, upsert semantics, and bounded-label telemetry.
+  - Added Step 2.3b (incremental ingestion and "run it twice" test) and Step 2.13 (judge calibration).
+- Deferred Step 1.10 public skeleton deployment per user decision; smoke tests and Docker containerization remain ready in `scripts/smoke.sh`, `Dockerfile`, and `docker-compose.yml`.
+- Updated `PROJECT_STATE.md` to reflect Plan v0.2, marked Step 1.10 as deferred, and set Next Step to Step 2.0a.
+
+Broke:
+- No test failures.
+
+Fixed:
+- Avoided premature cloud deployment of an empty service; focused engineering effort on core bilingual RAG capability.
+
+Numbers:
+- 196 test items collected: 191 passed offline tests, 5 live tests deselected by default.
+- Mypy: 0 issues across all source files.
+- Ruff: 0 lint or format warnings.
+- Architecture: 0 violations reported by import-linter.
+
+
 
 
 
