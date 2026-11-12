@@ -101,7 +101,7 @@ support-copilot/
 │   └── [x] smoke.sh                      (Plan Step 1.10, smoke tests for /healthz, /readyz, /ask)
 ├── configs/
 │   ├── [x] base.yaml                     (model roles: router, answer, judge, and Groq endpoint, Step 1.4)
-│   ├── [ ] crawl.yaml                    (built-in crawl rules, Plan Step 2.0a)
+│   ├── [x] crawl.yaml                    (built-in crawl rules, Plan Step 2.0a)
 │   ├── [x] dev.yaml                      (development environment overrides, Step 1.4)
 │   ├── [ ] prod.yaml
 │   ├── [ ] thresholds.yaml
@@ -153,7 +153,18 @@ support-copilot/
 │   │       ├── [ ] groq_orpheus.py
 │   │       ├── [ ] edge_tts.py
 │   │       └── [ ] piper_local.py
-│   ├── rag/                              (Step 1.1 package skeleton: __init__.py)
+│   ├── rag/
+│   │   ├── [x] __init__.py               (Step 1.1 package skeleton, Step 2.0a exports)
+│   │   └── crawler/                      (Step 2.0a polite crawler)
+│   │       ├── [x] __init__.py           (Step 2.0a exports)
+│   │       ├── [x] client.py             (PoliteClient: lock, delay, backoff, 304, circuit breaker)
+│   │       ├── [x] config.py             (CrawlConfig: YAML loader, User-Agent with contact)
+│   │       ├── [x] errors.py             (CrawlerError, CrawlBlockedError, RobotsDisallowedError, etc.)
+│   │       ├── [x] robots.py             (RobotsPolicy: urllib.robotparser, 404 allow, 5xx block)
+│   │       ├── [x] url_utils.py          (normalize_url, is_allowed_url allowlist)
+│   │       ├── [x] orchestrator.py       (CrawlOrchestrator: BFS frontier queue, link extraction, limits)
+│   │       ├── [x] cli.py                (CLI runner refusing without CRAWL_CONTACT)
+│   │       └── [x] __main__.py           (CLI executable module)
 │   ├── agent/                            (Step 1.1 package skeleton: __init__.py)
 │   ├── voice/
 │   │   ├── [x] __init__.py               (Step 1.1 package skeleton)
@@ -205,7 +216,9 @@ support-copilot/
 │   │   ├── [x] test_llm_port.py          (Step 1.3: Protocol runtime check, frozen schemas, role rejection)
 │   │   ├── [x] test_llm_wrappers.py      (Step 1.5: Retrying transient backoff, Fallback chain, Groq->Gemini)
 │   │   ├── [x] test_api.py               (Step 1.6: healthz, readyz 503/200, ask DI override, 422 validation)
-│   │   └── [x] test_logging.py           (Step 1.7: structlog JSON, request_id correlation, PII redaction, INFO privacy)
+│   │   ├── [x] test_logging.py           (Step 1.7: structlog JSON, request_id correlation, PII redaction, INFO privacy)
+│   │   ├── [x] test_docker.py            (Step 1.8: Dockerfile, non-root user, ffmpeg, healthcheck probes)
+│   │   └── [x] test_crawler.py           (Step 2.0a: 31 unit tests for polite crawler, robots rules, delay, 304, contact)
 │   └── integration/
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
 ├── docker/
@@ -259,22 +272,21 @@ One row per delivery. Claude adds a row every time it ships files.
 | 13 | 2026-11-09 | 1.7 Logging (structlog JSON, request_id middleware, redaction) | `src/copilot/observability/context.py`, `src/copilot/observability/redaction.py`, `src/copilot/observability/logging.py`, `src/copilot/observability/middleware.py`, `src/copilot/observability/__init__.py`, `src/copilot/api/main.py`, `tests/unit/test_logging.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests in `tests/unit/test_logging.py`: valid single-line JSON log output with request_id, same request_id across all log lines of a single request, distinct IDs across consecutive requests, client X-Request-ID preservation, PII and secret redaction for email, phone, card, and tokens/API keys, structlog processor pipeline integration, and strict verification that no message body appears in INFO access logs | `make check` (or `uv run pytest tests/unit/test_logging.py -v`) | yes (all 172 offline tests passed, 5 live tests deselected) |
 | 14 | 2026-11-09 | 1.7 Logging refinements (Pure ASGI middleware, ID validation, stdlib segregation, Uvicorn hook) | `src/copilot/observability/middleware.py`, `src/copilot/observability/logging.py`, `src/copilot/observability/__init__.py`, `src/copilot/api/main.py`, `tests/unit/test_logging.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests added (+20 total in `tests/unit/test_logging.py`): Pure ASGI middleware, request_id validation regex, error response header attachment, token restoration, strict log level validation, safe root handlers closing/replacement, Uvicorn logger interception, configuration idempotence, foreign log formatting, and lifecycle request_id schema handling | `make check` (or `uv run pytest tests/unit/test_logging.py -v`) | yes (all 182 offline tests passed, 5 live tests deselected) |
 | 15 | 2026-11-10 | 1.8 Docker (multi-stage Dockerfile, compose core profile, pgvector, redis) | `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `docker-compose.ci.yml`, `scripts/check_docker.sh`, `.github/workflows/ci.yml`, `.env.example`, `tests/unit/test_docker.py`, `LOG.md`, `PROJECT_STATE.md` | 8 unit tests in `tests/unit/test_docker.py` + automated CI execution of `scripts/check_docker.sh`: verifies multi-stage build, non-root user (UID 10001), ffmpeg installation, healthcheck probe, .dockerignore filters, docker-compose core profile (app, pgvector/pgvector:pg16, redis:7-alpine), image size constraint (<= 400 MB), and /healthz + /readyz HTTP 200 responses | `make check` and `bash scripts/check_docker.sh` | yes (all tests verified and passing) |
-| 16 | 2026-11-11 | Plan v0.2 & deferral of Step 1.10 (Transition to Week 2A RAG) | `plan.md`, `LOG.md`, `PROJECT_STATE.md`, `scripts/smoke.sh`, `render.yaml` | `smoke.sh` ready for live deployment; adopted Plan v0.2 with Week 2 split into 2A (ingest & answer) and 2B (measure & operate); added Step 2.3b (incremental ingestion / "run it twice" test) and Step 2.13 (judge calibration); deferred skeleton cloud deployment | `python3 scripts/check_docs.py` | [~] |
+| 16 | 2026-11-11 | Plan v0.2 & deferral of Step 1.10 (Transition to Week 2A RAG) | `plan.md`, `LOG.md`, `PROJECT_STATE.md`, `scripts/smoke.sh`, `render.yaml` | `smoke.sh` ready for live deployment; adopted Plan v0.2 with Week 2 split into 2A (ingest & answer) and 2B (measure & operate); added Step 2.3b (incremental ingestion / "run it twice" test) and Step 2.13 (judge calibration); deferred skeleton cloud deployment | `python3 scripts/check_docs.py` | yes (adopted Plan v0.2) |
+| 17 | 2026-11-12 | 2.0a Crawl rules and polite client | `configs/crawl.yaml`, `src/copilot/rag/crawler/errors.py`, `src/copilot/rag/crawler/config.py`, `src/copilot/rag/crawler/url_utils.py`, `src/copilot/rag/crawler/robots.py`, `src/copilot/rag/crawler/client.py`, `src/copilot/rag/crawler/cli.py`, `src/copilot/rag/crawler/__main__.py`, `src/copilot/rag/crawler/__init__.py`, `src/copilot/rag/__init__.py`, `.gitignore`, `tests/unit/test_crawler.py`, `LOG.md`, `PROJECT_STATE.md` | 31 unit tests in `tests/unit/test_crawler.py`: verifies CRAWL_CONTACT requirement, User-Agent formatting, URL normalization (fragments, tracking params, slashes, ports), host/prefix allowlist, denied patterns, robots.txt rules (allowed, disallowed, crawl-delay, 404 allows, 5xx blocks, network error blocks), polite delay via FakeSleeper, conditional requests (ETag/Last-Modified) with 304 unchanged, circuit breaker stopping after repeated 403/429, and retries with backoff on 5xx | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_crawler.py', '-v']))"` | yes (all 31 unit tests passing) |
 
 ---
 
 ## 6. Next up
 
 1. Carry-over items:
-   - Add `data/private/` to `.gitignore`: `printf '\n# Crawled page text belongs to the website owner: never commit it\ndata/private/\n' >> .gitignore`.
-   - Check that `.env.example` lists `CRAWL_CONTACT` and `APP_JWT_SECRET`.
+   - Check that `.env.example` lists `CRAWL_CONTACT` and `APP_JWT_SECRET` (confirmed).
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
-   - Before Step 2.0a: read the te.eg `robots.txt` and terms of use and write the result in `LOG.md`.
-2. **Next step: Week 2A (RAG Ingest & Answer) — Step 2.0a (Crawl rules and polite client)**
-   - `configs/crawl.yaml` with start URLs (`https://www.te.eg/we`), allowed prefixes, User-Agent with contact, delay between requests, and max pages limit.
-   - Polite HTTP client obeying `robots.txt`, conditional GET, single connection, exponential backoff on 429/503.
-3. Steps 2.0a to 2.5a (Week 2A) -> Steps 2.6 to 2.13 (Week 2B).
+2. **Next step: Week 2A (RAG Ingest & Answer) — Step 2.0b (Immutable snapshot)**
+   - Create ingestion script that builds an immutable snapshot directory (e.g. `data/private/snapshots/YYYY-MM-DD/`) containing crawled page texts, raw HTML, and metadata.
+   - Generate `data/snapshots/<id>/manifest.jsonl` (URL, fetched_at timestamp, language, content sha256 hash) committed to git (without proprietary page text).
+3. Steps 2.0c to 2.5a (Week 2A) -> Steps 2.6 to 2.13 (Week 2B).
 4. Step 1.10 (Deploy to Render): deferred until RAG system is ready with knowledge base.
 
 ---

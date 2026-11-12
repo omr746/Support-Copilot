@@ -1,0 +1,37 @@
+# configs/crawl.yaml — Polite crawler configuration for Telecom Egypt (WE) knowledge base
+start_urls:
+  - https://www.te.eg
+
+allowed_hosts:
+  - www.te.eg
+  - te.eg
+
+allowed_path_prefixes:
+  - /
+
+denied_patterns:
+  - "(?i)login"
+  - "(?i)signin"
+  - "(?i)account"
+  - "(?i)my[-_]?account"
+  - "(?i)bill[-_]?pay"
+  - "(?i)payment"
+  - "(?i)recharge"
+  - "(?i)checkout"
+  - "(?i)cart"
+  - "(?i)form"
+  - "(?i)password"
+  - "(?i)register"
+  - "(?i)auth"
+  - "\\?"
+
+languages:
+  - ar
+  - en
+
+page_cap: 100
+delay_seconds: 1.0
+timeout_seconds: 10.0
+max_retries: 3
+consecutive_error_limit: 3
+user_agent_prefix: "SupportCopilot/0.1.0"
