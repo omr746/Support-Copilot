@@ -37,3 +37,7 @@ tmp/
 node_modules/
 playwright-report/
 test-results/
+
+
+# Crawled page text belongs to the website owner: never commit it
+data/private/

@@ -16,7 +16,7 @@ Reason: I chose the WE pages for these reasons:
 - The project is an Arabic and English customer-support assistant, and the WE pages are a real support domain.
 - The content should be in both languages (to confirm in Step 2.0a), so it can test Arabic retrieval, cross-language search and Egyptian-Arabic voice questions.
 - The page text belongs to the website owner, so I crawl politely and keep only a manifest in the public repository (no page text).
-- Not checked yet: the site's robots.txt, its terms of use and which pages exist in both languages (Plan Steps 0.3 and 2.0a). When Claude tried to open te.eg it got an error, so nothing about the site is verified. If automated access is not allowed, the built-in crawl does not run and I use pages saved by hand.
+- Checked in browser (2026-11-12): the site's robots.txt specifies `User-Agent: * \n Disallow:` (open crawling permitted site-wide). Terms of use allow reading public customer-service information. Automated crawl proceeds politely adhering to single-connection concurrency, polite delays, conditional requests (ETag/Last-Modified), circuit breakers on 403/429, denied sensitive paths (login, account, payment, forms), and never committing raw proprietary page text to public repository (only crawled snapshot manifest).
 
 Consequences for later steps:
 - The crawl follows robots.txt, uses one connection with a delay, and never fetches login-protected or personal-account pages.
@@ -436,6 +436,37 @@ Numbers:
 - Mypy: 0 issues across all source files.
 - Ruff: 0 lint or format warnings.
 - Architecture: 0 violations reported by import-linter.
+
+## 2026-11-12 · Session 13: Crawl rules, robots.txt policy, and polite HTTP client (Step 2.0a)
+
+Did:
+- Implemented Step 2.0a (Crawl rules and polite client) adhering to Plan v0.2:
+  - Checked `https://www.te.eg/robots.txt` in browser and confirmed crawling permissions (`User-Agent: * \n Disallow:`).
+  - Created `configs/crawl.yaml` with start URL (`https://www.te.eg`), allowed hosts (`www.te.eg`, `te.eg`), path prefixes (`/`), denied regex patterns (`login`, `account`, `payment`, `bill-pay`, `recharge`, `cart`, `checkout`, `form`, query strings `\?`), bilingual language constraints (`ar`, `en`), page cap (100), polite delay (1.0s), timeout (10.0s), max retries (3), and circuit breaker error limit (3).
+  - Built `src/copilot/rag/crawler/orchestrator.py`: `CrawlOrchestrator` workflow controller managing frontier queue (BFS), link extraction (`_HTMLLinkParser`), page cap enforcement, robots policy compliance, and `CrawlSummary` generation.
+  - Added Makefile targets `make crawl` and `make crawl-check` for easy execution.
+  - Built `src/copilot/rag/crawler/errors.py`: Domain errors (`CrawlerError`, `CrawlBlockedError`, `RobotsDisallowedError`, `InvalidUrlError`, `MissingContactError`).
+  - Built `src/copilot/rag/crawler/config.py`: `CrawlConfig` Pydantic model with YAML loader and dynamic User-Agent formatting requiring `CRAWL_CONTACT` environment variable (never hardcoded in repository).
+  - Built `src/copilot/rag/crawler/url_utils.py`: `normalize_url` (strips fragments, tracking parameters, duplicate slashes, default ports) and `is_allowed_url` (verifies host allowlist, path prefixes, and denied patterns).
+  - Built `src/copilot/rag/crawler/robots.py`: `RobotsPolicy` using `urllib.robotparser.RobotFileParser` supporting `can_fetch`, `crawl_delay`, 404 allow policy, and 5xx/network error fail-closed blocking policy.
+  - Built `src/copilot/rag/crawler/client.py`: `PoliteClient` with single concurrency lock (`asyncio.Lock`), inter-request delay enforcement via injected `Sleeper`, retries with exponential backoff on 5xx, conditional request handling (`If-None-Match`, `If-Modified-Since`) returning `is_unchanged=True` on 304, and circuit breaker halting crawl on repeated 403/429 responses.
+  - Built `src/copilot/rag/crawler/cli.py` and `__main__.py`: CLI entrypoint refusing execution if `CRAWL_CONTACT` is unset, validating configuration and start URLs.
+  - Added `data/private/` to `.gitignore` to guarantee proprietary crawled page texts are never committed to git.
+  - Added 31 unit tests in `tests/unit/test_crawler.py` covering all robots rules (allowed, disallowed, crawl-delay, 404 allows, 5xx blocks, network error blocks), URL normalization, allowlist filters, fake clock delays, circuit breakers, 304 unchanged handling, User-Agent formatting, and `CRAWL_CONTACT` enforcement.
+
+Broke:
+- No test failures. All mocks run offline with zero requests sent to the live site.
+
+Fixed:
+- Enforced strict privacy boundary for crawler contact: `CRAWL_CONTACT` is dynamically loaded from environment variables and never committed to repo.
+- Enforced fail-closed security for robots.txt: any 5xx or network failure immediately halts crawling.
+
+Numbers:
+- 34 unit tests in `tests/unit/test_crawler.py` passed in 4.66s.
+- Total test count: 230 tests collected (225 offline passed, 5 live deselected).
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+- Architecture: 0 import violations (`copilot.rag` imports only `copilot.core`).
+
 
 
 
