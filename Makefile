@@ -1,13 +1,19 @@
 -include .env
 export CRAWL_CONTACT
 
-.PHONY: install install-all test test-live lint format typecheck import-check check crawl crawl-check
+.PHONY: install install-all test test-live lint format typecheck import-check check crawl crawl-check crawl-dry-run crawl-resume
 
 crawl:
-	uv run python -m copilot.rag.crawler.cli --config configs/crawl.yaml
+	uv run python -m copilot.rag.crawl --config configs/crawl.yaml
+
+crawl-dry-run:
+	uv run python -m copilot.rag.crawl --config configs/crawl.yaml --dry-run
+
+crawl-resume:
+	uv run python -m copilot.rag.crawl --config configs/crawl.yaml --resume
 
 crawl-check:
-	uv run python -m copilot.rag.crawler.cli --config configs/crawl.yaml --check-only
+	uv run python -m copilot.rag.crawl --config configs/crawl.yaml --check-only
 
 install:
 	uv sync --group dev
