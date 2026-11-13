@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-09 · Delivery count: 13 (rows 1 to 13 confirmed) · Plan reference: Step-by-Step Execution Plan v0.1, October 30, 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-13 · Delivery count: 23 (rows 1 to 23 confirmed) · Plan reference: Step-by-Step Execution Plan v0.2, November 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0, Step 1.1, Step 1.2, Step 1.3, Step 1.4, Step 1.5, Step 1.6, and Step 1.7 are complete. Next: Step 1.8 (Tracing: OpenTelemetry and Langfuse integration).
+Plan progress: Step 0 through Step 2.0c are complete (including crawler pipeline integration tests, orchestrator resilience, atomic resume, cleaner optimization, snapshot immutability, and O(1) dictionary indexing). Next: Step 2.1 (Normalization, chunking and fingerprint).
 
 ---
 
@@ -154,16 +154,24 @@ support-copilot/
 │   │       ├── [ ] edge_tts.py
 │   │       └── [ ] piper_local.py
 │   ├── rag/
-│   │   ├── [x] __init__.py               (Step 1.1 package skeleton, Step 2.0a exports)
-│   │   └── crawler/                      (Step 2.0a polite crawler)
-│   │       ├── [x] __init__.py           (Step 2.0a exports)
+│   │   ├── [x] __init__.py               (Step 1.1 package skeleton, Step 2.0 exports)
+│   │   ├── [x] crawl.py                  (Step 2.0c: standalone CLI entrypoint python -m copilot.rag.crawl)
+│   │   ├── [x] cleaner.py                (Backward-compatible re-export -> crawler.cleaner)
+│   │   ├── [x] models.py                 (Backward-compatible re-export -> crawler.models)
+│   │   ├── [x] snapshot.py               (Backward-compatible re-export -> crawler.snapshot)
+│   │   └── crawler/                      (Unified crawler, cleaner, and snapshot package)
+│   │       ├── [x] __init__.py           (Crawler package exports)
 │   │       ├── [x] client.py             (PoliteClient: lock, delay, backoff, 304, circuit breaker)
 │   │       ├── [x] config.py             (CrawlConfig: YAML loader, User-Agent with contact)
 │   │       ├── [x] errors.py             (CrawlerError, CrawlBlockedError, RobotsDisallowedError, etc.)
 │   │       ├── [x] robots.py             (RobotsPolicy: urllib.robotparser, 404 allow, 5xx block)
-│   │       ├── [x] url_utils.py          (normalize_url, is_allowed_url allowlist)
-│   │       ├── [x] orchestrator.py       (CrawlOrchestrator: BFS frontier queue, link extraction, limits)
-│   │       ├── [x] cli.py                (CLI runner refusing without CRAWL_CONTACT)
+│   │       ├── [x] url_utils.py          (normalize_url, is_allowed_url, hash_path for query-safe logging)
+│   │       ├── [x] cleaner.py            (Step 2.0b: Trafilatura + BeautifulSoup text cleaner, language detection, SPA shell detection)
+│   │       ├── [x] models.py             (Step 2.0b & 2.0c: PageVersion, SnapshotManifestEntry, Snapshot, CrawlSummary, CrawlMetrics)
+│   │       ├── [x] snapshot.py           (Step 2.0b: SnapshotStore, canonical deduplication, versioning, manifest & private backup, rollback)
+│   │       ├── [x] metrics.py            (Step 2.0c: trace_crawl_run OpenTelemetry span, privacy-safe log_page_visit, CrawlMetrics)
+│   │       ├── [x] orchestrator.py       (Step 2.0a-c: CrawlOrchestrator BFS, link extraction, dry-run, resume, clean & snapshot, metrics)
+│   │       ├── [x] cli.py                (Step 2.0c: CLI runner with --dry-run, --resume, --failure-threshold, summary report)
 │   │       └── [x] __main__.py           (CLI executable module)
 │   ├── agent/                            (Step 1.1 package skeleton: __init__.py)
 │   ├── voice/
@@ -201,7 +209,9 @@ support-copilot/
 │   │   ├── [x] __init__.py               (Step 1.3)
 │   │   ├── [x] fake_llm.py               (FakeLLM satisfying ChatModel Protocol, Step 1.3, enhanced Step 1.5)
 │   │   └── [x] fake_sleeper.py           (FakeSleeper for zero-delay clock testing, Step 1.5)
-│   ├── fixtures/corpus/                  hand-written fixture corpus for CI (never live site data)
+│   ├── fixtures/
+│   │   ├── corpus/                       hand-written fixture corpus for CI (never live site data)
+│   │   └── html/                         (Step 2.0b: Arabic support, timestamp change, real text change, JS shell, English support)
 │   ├── contract/
 │   │   ├── [x] __init__.py               (Step 1.4)
 │   │   └── [x] test_llm_contract.py      (Step 1.4: mocked HTTP contract tests & manual live test)
@@ -218,18 +228,23 @@ support-copilot/
 │   │   ├── [x] test_api.py               (Step 1.6: healthz, readyz 503/200, ask DI override, 422 validation)
 │   │   ├── [x] test_logging.py           (Step 1.7: structlog JSON, request_id correlation, PII redaction, INFO privacy)
 │   │   ├── [x] test_docker.py            (Step 1.8: Dockerfile, non-root user, ffmpeg, healthcheck probes)
-│   │   └── [x] test_crawler.py           (Step 2.0a: 31 unit tests for polite crawler, robots rules, delay, 304, contact)
+│   │   ├── [x] test_crawler.py           (Step 2.0a: 34 unit tests for polite crawler, robots rules, delay, 304, contact)
+│   │   ├── [x] test_cleaner_and_snapshot.py (Step 2.0b: 11 unit tests for HTML cleaning, content hash, snapshots, manifest privacy)
+│   │   └── [x] test_crawl_command.py     (Step 2.0c: 8 unit tests for dry-run, resume, summary report, threshold exit codes, and run-it-twice idempotence)
 │   └── integration/
+│       ├── [x] test_crawler_pipeline.py     (8 end-to-end integration tests & real socket tests)
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
 ├── docker/
 │   ├── [ ] Dockerfile
-│   └── compose/                          docker-compose.yml, docker-compose.obs.yml, docker-compose.ci.yml
+│   └── compose/                          docker-compose.yml (core profile: app, postgres, redis, jaeger), docker-compose.ci.yml
 ├── ops/                                  otel, prometheus, grafana, loki, tempo, runbooks
 ├── infra/terraform/                      modules, envs/staging, envs/prod
 ├── docs/
+│   ├── [x] prd-crawler.md                (PRD for Polite Crawler with 14 Chapter 08 Behavioral Scenarios)
 │   ├── adr/
 │   │   ├── [x] .gitkeep                  (keeps the folder in git; `check_docs.py` needs docs/adr/ to exist)
-│   │   └── [x] 0001-ports-and-adapters-with-provider-registry.md   (Plan Step 0.5)
+│   │   ├── [x] 0001-ports-and-adapters-with-provider-registry.md   (Plan Step 0.5)
+│   │   └── [x] 0002-polite-crawler-and-immutable-snapshots.md     (Step 2.0a-c: Crawler, Politeness, Snapshots)
 │   └── model-cards/
 └── .github/workflows/
     ├── [x] ci.yml                        (Plan Step 1.1 & 1.2: format, lint, typecheck, import-linter, unit tests)
@@ -273,7 +288,14 @@ One row per delivery. Claude adds a row every time it ships files.
 | 14 | 2026-11-09 | 1.7 Logging refinements (Pure ASGI middleware, ID validation, stdlib segregation, Uvicorn hook) | `src/copilot/observability/middleware.py`, `src/copilot/observability/logging.py`, `src/copilot/observability/__init__.py`, `src/copilot/api/main.py`, `tests/unit/test_logging.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests added (+20 total in `tests/unit/test_logging.py`): Pure ASGI middleware, request_id validation regex, error response header attachment, token restoration, strict log level validation, safe root handlers closing/replacement, Uvicorn logger interception, configuration idempotence, foreign log formatting, and lifecycle request_id schema handling | `make check` (or `uv run pytest tests/unit/test_logging.py -v`) | yes (all 182 offline tests passed, 5 live tests deselected) |
 | 15 | 2026-11-10 | 1.8 Docker (multi-stage Dockerfile, compose core profile, pgvector, redis) | `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `docker-compose.ci.yml`, `scripts/check_docker.sh`, `.github/workflows/ci.yml`, `.env.example`, `tests/unit/test_docker.py`, `LOG.md`, `PROJECT_STATE.md` | 8 unit tests in `tests/unit/test_docker.py` + automated CI execution of `scripts/check_docker.sh`: verifies multi-stage build, non-root user (UID 10001), ffmpeg installation, healthcheck probe, .dockerignore filters, docker-compose core profile (app, pgvector/pgvector:pg16, redis:7-alpine), image size constraint (<= 400 MB), and /healthz + /readyz HTTP 200 responses | `make check` and `bash scripts/check_docker.sh` | yes (all tests verified and passing) |
 | 16 | 2026-11-11 | Plan v0.2 & deferral of Step 1.10 (Transition to Week 2A RAG) | `plan.md`, `LOG.md`, `PROJECT_STATE.md`, `scripts/smoke.sh`, `render.yaml` | `smoke.sh` ready for live deployment; adopted Plan v0.2 with Week 2 split into 2A (ingest & answer) and 2B (measure & operate); added Step 2.3b (incremental ingestion / "run it twice" test) and Step 2.13 (judge calibration); deferred skeleton cloud deployment | `python3 scripts/check_docs.py` | yes (adopted Plan v0.2) |
-| 17 | 2026-11-12 | 2.0a Crawl rules and polite client | `configs/crawl.yaml`, `src/copilot/rag/crawler/errors.py`, `src/copilot/rag/crawler/config.py`, `src/copilot/rag/crawler/url_utils.py`, `src/copilot/rag/crawler/robots.py`, `src/copilot/rag/crawler/client.py`, `src/copilot/rag/crawler/cli.py`, `src/copilot/rag/crawler/__main__.py`, `src/copilot/rag/crawler/__init__.py`, `src/copilot/rag/__init__.py`, `.gitignore`, `tests/unit/test_crawler.py`, `LOG.md`, `PROJECT_STATE.md` | 31 unit tests in `tests/unit/test_crawler.py`: verifies CRAWL_CONTACT requirement, User-Agent formatting, URL normalization (fragments, tracking params, slashes, ports), host/prefix allowlist, denied patterns, robots.txt rules (allowed, disallowed, crawl-delay, 404 allows, 5xx blocks, network error blocks), polite delay via FakeSleeper, conditional requests (ETag/Last-Modified) with 304 unchanged, circuit breaker stopping after repeated 403/429, and retries with backoff on 5xx | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_crawler.py', '-v']))"` | yes (all 31 unit tests passing) |
+| 17 | 2026-11-12 | 2.0a Crawl rules and polite client | `configs/crawl.yaml`, `src/copilot/rag/crawler/errors.py`, `src/copilot/rag/crawler/config.py`, `src/copilot/rag/crawler/url_utils.py`, `src/copilot/rag/crawler/robots.py`, `src/copilot/rag/crawler/client.py`, `src/copilot/rag/crawler/cli.py`, `src/copilot/rag/crawler/__main__.py`, `src/copilot/rag/crawler/__init__.py`, `src/copilot/rag/__init__.py`, `.gitignore`, `tests/unit/test_crawler.py`, `LOG.md`, `PROJECT_STATE.md` | 34 unit tests in `tests/unit/test_crawler.py`: verifies CRAWL_CONTACT requirement, User-Agent formatting, URL normalization (fragments, tracking params, slashes, ports), host/prefix allowlist, denied patterns, robots.txt rules (allowed, disallowed, crawl-delay, 404 allows, 5xx blocks, network error blocks), polite delay via FakeSleeper, conditional requests (ETag/Last-Modified) with 304 unchanged, circuit breaker stopping after repeated 403/429, and retries with backoff on 5xx | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_crawler.py', '-v']))"` | yes (all 34 unit tests passing) |
+| 18 | 2026-11-12 | 2.0b Fetch, clean, store and snapshot | `src/copilot/rag/cleaner.py`, `src/copilot/rag/models.py`, `src/copilot/rag/snapshot.py`, `src/copilot/rag/__init__.py`, `pyproject.toml`, `tests/fixtures/html/*`, `tests/unit/test_cleaner_and_snapshot.py`, `LOG.md`, `PROJECT_STATE.md` | 11 unit tests in `tests/unit/test_cleaner_and_snapshot.py`: main text retained & boilerplate dropped via Trafilatura + BeautifulSoup, Arabic text and digits survive, language detection (`ar`, `en`), identical hash on timestamp/banner changes, different hash on text changes, SPA shell flagged `needs_js=True`, canonical URL deduplication, 404 recorded without content, unchanged version reuse, removed page marked in new snapshot only, manifest has no text field, active snapshot switching & rollback | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_cleaner_and_snapshot.py', '-v']))"` | yes (all 11 unit tests passing) |
+| 19 | 2026-11-12 | 2.0c Crawl command and report | `src/copilot/rag/crawl.py`, `src/copilot/rag/crawler/orchestrator.py`, `src/copilot/rag/crawler/cli.py`, `src/copilot/rag/crawler/metrics.py`, `src/copilot/rag/crawler/models.py`, `src/copilot/rag/crawler/snapshot.py`, `src/copilot/rag/crawler/cleaner.py`, `src/copilot/rag/crawler/url_utils.py`, `src/copilot/rag/crawler/__init__.py`, `src/copilot/rag/__init__.py`, `Makefile`, `tests/unit/test_crawl_command.py`, `LOG.md`, `PROJECT_STATE.md` | 8 unit tests in `tests/unit/test_crawl_command.py`: dry run makes 0 network calls and writes nothing, resume avoids duplicate fetches, summary counts match known fake server outcomes, failure rate above threshold exits with non-zero code, run-twice against unchanged server reports all as unchanged and creates 0 new page versions, query strings never logged or hashed in structured logs, crawl metrics & OpenTelemetry span emitted | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_crawl_command.py', '-v']))"` | yes (all 8 unit tests passing) |
+| 20 | 2026-11-13 | 2.0b/c Snapshot architecture & O(1) indexing | `src/copilot/rag/crawler/snapshot.py`, `src/copilot/rag/crawler/orchestrator.py`, `src/copilot/rag/crawler/cleaner.py`, `tests/unit/test_cleaner_and_snapshot.py`, `tests/unit/test_crawl_command.py`, `LOG.md`, `PROJECT_STATE.md` | 17 unit tests in `test_cleaner_and_snapshot.py` and 8 in `test_crawl_command.py` (+6 new unit tests): decoupled activation (manual/eval gate promotion via `activate_snapshot`), atomic directory/file replacement with `os.replace`, immutability guard (`FileExistsError`), 404 on known page marks removed while unknown 404 is omitted, non-200 error pages never stored as content and keep previous version, 304 without previous version skipped without junk, partial crawls carry unvisited pages over unchanged, canonical URL allowlist validation, and O(1) dictionary indexing replacing O(N^2) comparison | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_cleaner_and_snapshot.py', 'tests/unit/test_crawl_command.py', '-v']))"` | yes (all 25 snapshot & crawl unit tests passing, 232 total unit tests passing) |
+| 21 | 2026-11-13 | 2.0b Cleaner optimization & hardening | `src/copilot/rag/crawler/cleaner.py`, `tests/unit/test_cleaner_and_snapshot.py`, `LOG.md`, `PROJECT_STATE.md` | 21 unit tests in `test_cleaner_and_snapshot.py` (+4 new unit tests): single-pass HTML parsing (zero redundant DOM re-parsing), real package cleaner versioning (`importlib.metadata.version`), `<html lang="...">` and density-weighted Arabic language detection, multi-signal JS shell detection, and default sensitive path guard for canonical validation without config | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_cleaner_and_snapshot.py', '-v']))"` | yes (all 21 cleaner & snapshot unit tests passing, 236 total unit tests passing) |
+| 22 | 2026-11-13 | 2.0c Orchestrator resilience & atomic resume | `src/copilot/rag/crawler/orchestrator.py`, `src/copilot/rag/crawler/models.py`, `tests/unit/test_crawl_command.py`, `LOG.md`, `PROJECT_STATE.md` | 10 unit tests in `test_crawl_command.py` (+2 new unit tests): full CrawlResult persistence and restoration in state file preventing data loss on resume, conditional state cleanup only on full completion, atomic state writes via `os.replace`, corrupted state validation handling, uniform state persistence across all failure paths, and unified O(1) active snapshot lookups | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/unit/test_crawl_command.py', '-v']))"` | yes (all 10 crawl command unit tests passing, 238 total unit tests passing) |
+| 23 | 2026-11-13 | 2.0a/b/c Integration Tests & Local Real Socket Verification | `src/copilot/rag/crawler/models.py`, `src/copilot/rag/crawler/snapshot.py`, `src/copilot/rag/crawler/orchestrator.py`, `tests/integration/test_crawler_pipeline.py`, `tests/unit/test_cleaner_and_snapshot.py`, `tests/unit/test_crawl_command.py`, `LOG.md`, `PROJECT_STATE.md` | 8 integration tests in `tests/integration/test_crawler_pipeline.py`: non-vacuous robots exclusion, deterministic exact metric assertions, politeness delay via FakeSleeper and User-Agent contact verification, crawl interruption and atomic resume with zero duplicate fetches and golden snapshot equivalence, separate not_found counter preventing 404 failure-rate inflation, injected clock and last_verified_at freshness assertions, loopback network access guard, and 3 real TCP socket tests (gzip compression, 302 redirect, timeout handling) | `py -3 -u -c "import sys; sys.path.append(r'.venv\lib\python3.12\site-packages'); sys.path.insert(0, 'src'); import pytest; sys.exit(pytest.main(['tests/integration', 'tests/unit', '-v']))"` | yes (all 247 tests passing) |
+| 24 | 2026-11-13 | 2.0c Jaeger Tracing, Resilient Snapshot Reading, PRD & ADR-0002 | `docker-compose.yml`, `pyproject.toml`, `.env.example`, `.env`, `src/copilot/rag/crawler/metrics.py`, `src/copilot/rag/crawler/snapshot.py`, `src/copilot/rag/crawler/orchestrator.py`, `docs/adr/0002-polite-crawler-and-immutable-snapshots.md`, `docs/prd-crawler.md`, `LOG.md`, `PROJECT_STATE.md` | 247 tests passing + automated checks: `scripts/check_adrs.py` (2 sequential ADRs), `scripts/check_docs.py` (0 errors), resilient JSON/JSONL format parsing in `_read_records`, OpenTelemetry OTLP Jaeger tracing with root & child spans, active snapshot activation pointer | `python scripts/check_adrs.py; python scripts/check_docs.py` | yes (all 247 tests passing, ADR & docs checks passing) |
 
 ---
 
@@ -283,10 +305,12 @@ One row per delivery. Claude adds a row every time it ships files.
    - Check that `.env.example` lists `CRAWL_CONTACT` and `APP_JWT_SECRET` (confirmed).
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
-2. **Next step: Week 2A (RAG Ingest & Answer) — Step 2.0b (Immutable snapshot)**
-   - Create ingestion script that builds an immutable snapshot directory (e.g. `data/private/snapshots/YYYY-MM-DD/`) containing crawled page texts, raw HTML, and metadata.
-   - Generate `data/snapshots/<id>/manifest.jsonl` (URL, fetched_at timestamp, language, content sha256 hash) committed to git (without proprietary page text).
-3. Steps 2.0c to 2.5a (Week 2A) -> Steps 2.6 to 2.13 (Week 2B).
+2. **Next step: Week 2A (RAG Ingest & Answer) — Step 2.1 (Normalization, chunking and fingerprint)**
+   - Chunk by headings (500 to 800 tokens with overlap).
+   - Normalize Arabic text before chunking (diacritics, alef, yaa, taa marbuta, Arabic-Indic digits) while preserving original text for display.
+   - Attach metadata: source type, source id, page version id, URL, title, section path, language, fetched-at, chunk content hash, and pipeline fingerprint.
+   - Generate deterministic chunk IDs from page version id, section path, and chunk index.
+3. Steps 2.2 to 2.5a (Week 2A embeddings, vector search, reranking, and grounded answers) -> Steps 2.6 to 2.13 (Week 2B eval & operation).
 4. Step 1.10 (Deploy to Render): deferred until RAG system is ready with knowledge base.
 
 ---

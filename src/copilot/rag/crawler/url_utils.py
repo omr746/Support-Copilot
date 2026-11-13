@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -115,3 +116,21 @@ def is_allowed_url(url: str, config: CrawlConfig) -> tuple[bool, str]:
                 return False, f"URL matches denied pattern: {pattern}"
 
     return True, "Allowed"
+
+
+def hash_path(url: str) -> tuple[str, str]:
+    """Extract host and compute SHA-256 hash of the normalized path only.
+
+    Strict privacy rule: NEVER includes query strings, fragments, or parameters.
+    Returns:
+        tuple (host: str, path_hash: str)
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    path = parts.path or "/"
+    # Collapse multiple consecutive slashes
+    path = re.sub(r"/{2,}", "/", path)
+    if len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    path_hash = hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
+    return host, path_hash

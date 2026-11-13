@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -23,8 +23,8 @@ class CrawlResponse:
 
     url: str
     status_code: int
-    headers: dict[str, str]
-    text: str
+    text: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     etag: str | None = None
     last_modified: str | None = None
     is_unchanged: bool = False
