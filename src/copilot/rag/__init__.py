@@ -63,6 +63,8 @@ except ImportError:
 __all__ = [
     "CHUNKER_SETTINGS",
     "CLEANER_VERSION",
+    "FINGERPRINT_SCHEMA_VERSION",
+    "NORMALIZER_VERSION",
     "Chunk",
     "ChunkInput",
     "ChunkerConfig",
@@ -76,10 +78,8 @@ __all__ = [
     "CrawlSummary",
     "CrawlerError",
     "EmbedderConfig",
-    "FINGERPRINT_SCHEMA_VERSION",
     "InvalidUrlError",
     "MissingContactError",
-    "NORMALIZER_VERSION",
     "PageVersion",
     "PipelineFingerprint",
     "PoliteClient",
@@ -113,5 +113,3 @@ __all__ = [
     "parse_sections",
     "trace_crawl_run",
 ]
-
-

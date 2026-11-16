@@ -18,11 +18,9 @@ import unittest
 from pathlib import Path
 
 from copilot.rag.fingerprint import (
-    FINGERPRINT_SCHEMA_VERSION,
     ChunkerConfig,
     EmbedderConfig,
     PipelineFingerprint,
-    canonical_json,
     compute_pattern_version,
 )
 
@@ -164,13 +162,17 @@ class TestPipelineFingerprint(unittest.TestCase):
         self.assertIn("unknown", str(ctx.exception))
 
         # Changing prefix changes embedder digest
-        cfg_e5 = dataclasses.replace(self.embedder_cfg, query_prefix="query: ", passage_prefix="passage: ")
+        cfg_e5 = dataclasses.replace(
+            self.embedder_cfg, query_prefix="query: ", passage_prefix="passage: "
+        )
         fp_e5 = dataclasses.replace(self.fp, embedder_config=cfg_e5)
         self.assertNotEqual(self.fp.embedder_digest, fp_e5.embedder_digest)
 
     def test_cross_check_chunker_and_embedder_limits(self) -> None:
         """Fails loudly if chunker.max_tokens > embedder.max_length."""
-        oversize_chunker = dataclasses.replace(self.chunker_cfg, max_tokens=600, target_tokens=500, overlap_tokens=80)
+        oversize_chunker = dataclasses.replace(
+            self.chunker_cfg, max_tokens=600, target_tokens=500, overlap_tokens=80
+        )
         # embedder max_length is 512, chunker max_tokens is 600 -> must raise
         with self.assertRaises(ValueError) as ctx:
             PipelineFingerprint(
@@ -234,7 +236,9 @@ class TestPipelineFingerprint(unittest.TestCase):
         self.assertEqual(self.fp.changed_parts(n_fp), ["normalizer"])
 
         # 3. Chunker
-        new_ch = dataclasses.replace(self.chunker_cfg, max_tokens=400, target_tokens=300, overlap_tokens=50)
+        new_ch = dataclasses.replace(
+            self.chunker_cfg, max_tokens=400, target_tokens=300, overlap_tokens=50
+        )
         ch_fp = dataclasses.replace(self.fp, chunker_config=new_ch)
         self.assertEqual(self.fp.changed_parts(ch_fp), ["chunker"])
 
@@ -248,7 +252,9 @@ class TestPipelineFingerprint(unittest.TestCase):
         self.assertEqual(self.fp.changed_parts(emb_fp), ["embedder"])
 
         # 6. Multi-component
-        multi_fp = dataclasses.replace(self.fp, normalizer_version="v2", injection_pattern_version="p2")
+        multi_fp = dataclasses.replace(
+            self.fp, normalizer_version="v2", injection_pattern_version="p2"
+        )
         self.assertEqual(sorted(self.fp.changed_parts(multi_fp)), ["normalizer", "patterns"])
 
     def test_compute_pattern_version_hashing(self) -> None:

@@ -373,8 +373,15 @@ delay_seconds: 0.0
         encoding="utf-8",
     )
 
-    # Mock _execute_crawl returning high failure rate
-    with patch("copilot.rag.crawler.cli.CrawlOrchestrator") as mock_orch_cls:
+    # Mock _execute_crawl returning high failure rate and offline robots policy
+    with (
+        patch(
+            "copilot.rag.crawler.cli.RobotsPolicy.fetch",
+            new_callable=AsyncMock,
+            return_value=RobotsPolicy.allow_all(),
+        ),
+        patch("copilot.rag.crawler.cli.CrawlOrchestrator") as mock_orch_cls,
+    ):
         mock_orch = MagicMock()
         mock_summary = CrawlSummary(
             total_visited=2,

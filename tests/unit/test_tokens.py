@@ -79,7 +79,9 @@ class TestTokens(unittest.TestCase):
         arabic_text = "الدعم الفني لشركة الاتصالات"
         spans = counter.token_spans(arabic_text)
         self.assertEqual(len(spans), 4)
-        self.assertEqual([arabic_text[s:e] for s, e in spans], ["الدعم", "الفني", "لشركة", "الاتصالات"])
+        self.assertEqual(
+            [arabic_text[s:e] for s, e in spans], ["الدعم", "الفني", "لشركة", "الاتصالات"]
+        )
 
     def test_startup_limit_validation_exceeds_max_input_tokens(self) -> None:
         """Chunker must fail at startup if max_tokens exceeds token_counter.max_input_tokens."""

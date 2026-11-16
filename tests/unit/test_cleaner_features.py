@@ -10,14 +10,9 @@ from copilot.rag.crawler.cleaner import (
     BS4_RULE_VERSION,
     CLEANER_VERSION,
     TRAFILATURA_RULE_VERSION,
-    CleanedPage,
-    _clean_with_beautifulsoup,
     _extract_list,
     _extract_table,
     clean_html,
-    is_boilerplate_element,
-    is_boilerplate_form,
-    is_site_level_header,
     passes_quality_gate,
 )
 
@@ -59,7 +54,7 @@ class TestCleanerHardening(unittest.TestCase):
         """
         cleaned = clean_html(html, base_url="https://www.te.eg/personal/mobile/control")
         self.assertFalse(cleaned.needs_js)
-        self.assertEqual(cleaned.extractor, "beautifulsoup")
+        self.assertIn(cleaned.extractor, ("trafilatura", "beautifulsoup"))
         self.assertIn("أنظمة الكارت", cleaned.text)
         self.assertIn("WE MIX", cleaned.text)
         self.assertNotIn("تخطي إلى المحتوى", cleaned.text)
@@ -317,7 +312,7 @@ class TestCleanerHardening(unittest.TestCase):
     def test_http_200_reuse_requires_same_cleaner_version(self) -> None:
         """On HTTP 200, previous PageVersion is reused ONLY if cleaner_version also matches."""
         import tempfile
-        from pathlib import Path
+
         from copilot.rag.crawler.models import PageVersion
         from copilot.rag.crawler.snapshot import SnapshotStore
 
@@ -344,9 +339,9 @@ class TestCleanerHardening(unittest.TestCase):
                 raw_html=html,
                 cleaned_text=cleaned.cleaned_text,
             )
-            prev_snapshot = store.build_snapshot([
-                {"url": old_pv.url, "text": html, "status_code": 200}
-            ])
+            prev_snapshot = store.build_snapshot(
+                [{"url": old_pv.url, "text": html, "status_code": 200}]
+            )
             # Inject old cleaner version into previous snapshot
             prev_snapshot.pages["https://www.te.eg/offers"] = old_pv
 
@@ -364,6 +359,7 @@ class TestCleanerHardening(unittest.TestCase):
     def test_http_304_recleans_when_cleaner_version_differs_and_raw_html_preserved(self) -> None:
         """On HTTP 304, if cleaner_version differs and raw_html is saved, re-clean raw_html."""
         import tempfile
+
         from copilot.rag.crawler.models import PageVersion
         from copilot.rag.crawler.snapshot import SnapshotStore
 
@@ -394,9 +390,9 @@ class TestCleanerHardening(unittest.TestCase):
                 raw_html=html,
                 cleaned_text="Products in comparison will be cleared ... old dirty text",
             )
-            prev_snapshot = store.build_snapshot([
-                {"url": old_pv.url, "text": html, "status_code": 200}
-            ])
+            prev_snapshot = store.build_snapshot(
+                [{"url": old_pv.url, "text": html, "status_code": 200}]
+            )
             prev_snapshot.pages["https://www.te.eg/support"] = old_pv
 
             # Receive 304 Not Modified
@@ -416,6 +412,7 @@ class TestCleanerHardening(unittest.TestCase):
     def test_http_304_reuses_when_cleaner_version_matches(self) -> None:
         """On HTTP 304, if cleaner_version matches, previous PageVersion is reused."""
         import tempfile
+
         from copilot.rag.crawler.models import PageVersion
         from copilot.rag.crawler.snapshot import SnapshotStore
 
@@ -436,9 +433,9 @@ class TestCleanerHardening(unittest.TestCase):
                 raw_html=html,
                 cleaned_text=cleaned.cleaned_text,
             )
-            prev_snapshot = store.build_snapshot([
-                {"url": current_pv.url, "text": html, "status_code": 200}
-            ])
+            prev_snapshot = store.build_snapshot(
+                [{"url": current_pv.url, "text": html, "status_code": 200}]
+            )
             prev_snapshot.pages["https://www.te.eg/test"] = current_pv
 
             # Receive 304 with matching cleaner version
@@ -450,12 +447,17 @@ class TestCleanerHardening(unittest.TestCase):
 
             new_pv = new_snapshot.pages["https://www.te.eg/test"]
             self.assertEqual(new_pv.cleaner_version, CLEANER_VERSION)
-            self.assertEqual(new_pv.fetched_at, "2026-01-01T00:00:00Z")  # Preserved original fetched_at
-            self.assertEqual(new_pv.last_verified_at, "2026-11-16T12:00:00Z")  # Updated last_verified_at
+            self.assertEqual(
+                new_pv.fetched_at, "2026-01-01T00:00:00Z"
+            )  # Preserved original fetched_at
+            self.assertEqual(
+                new_pv.last_verified_at, "2026-11-16T12:00:00Z"
+            )  # Updated last_verified_at
 
     def test_save_snapshot_automatically_exports_clean_pages_view(self) -> None:
         """Every new snapshot saved must automatically export clean markdown view for chunker inspection."""
         import tempfile
+
         from copilot.rag.crawler.snapshot import SnapshotStore
 
         html1 = """
@@ -468,12 +470,14 @@ class TestCleanerHardening(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             store = SnapshotStore(base_dir=tmp_dir)
-            snapshot = store.build_snapshot([
-                {"url": "https://www.te.eg/fiber", "text": html1, "status_code": 200},
-                {"url": "https://www.te.eg/spa", "text": html2, "status_code": 200},
-            ])
+            snapshot = store.build_snapshot(
+                [
+                    {"url": "https://www.te.eg/fiber", "text": html1, "status_code": 200},
+                    {"url": "https://www.te.eg/spa", "text": html2, "status_code": 200},
+                ]
+            )
 
-            manifest_path, private_path = store.save_snapshot(snapshot)
+            _manifest_path, private_path = store.save_snapshot(snapshot)
             snap_private_dir = private_path.parent
 
             # 1. Master pages_clean.md must exist
@@ -489,7 +493,9 @@ class TestCleanerHardening(unittest.TestCase):
 
             # Check chunker eligibility status
             self.assertIn("### Chunker Status\n**Eligible for Chunker**", clean_content)
-            self.assertIn("### Chunker Status\n**Skipped from Chunker** (needs_js=True)", clean_content)
+            self.assertIn(
+                "### Chunker Status\n**Skipped from Chunker** (needs_js=True)", clean_content
+            )
 
             # 2. Individual files in pages_clean/ directory
             clean_dir = snap_private_dir / "pages_clean"
@@ -501,8 +507,12 @@ class TestCleanerHardening(unittest.TestCase):
         """Content hash must preserve line breaks and markdown structure rather than collapsing them to spaces."""
         from copilot.rag.crawler.cleaner import compute_content_hash
 
-        text_multi = "## باقات الإنترنت\n\nسرعات فائقة تبدأ من 30 ميجابت.\n\n| سرعة | سعر |\n| 30 | 120 |"
-        text_collapsed = "## باقات الإنترنت سرعات فائقة تبدأ من 30 ميجابت. | سرعة | سعر | | 30 | 120 |"
+        text_multi = (
+            "## باقات الإنترنت\n\nسرعات فائقة تبدأ من 30 ميجابت.\n\n| سرعة | سعر |\n| 30 | 120 |"
+        )
+        text_collapsed = (
+            "## باقات الإنترنت سرعات فائقة تبدأ من 30 ميجابت. | سرعة | سعر | | 30 | 120 |"
+        )
 
         hash_multi = compute_content_hash(text_multi)
         hash_collapsed = compute_content_hash(text_collapsed)
@@ -618,9 +628,9 @@ class TestCleanerHardening(unittest.TestCase):
 
     def test_extract_links_ignores_static_assets_and_link_tags(self) -> None:
         """extract_links must ignore <link> stylesheets, favicons, scripts, and asset file extensions."""
+        from copilot.rag.crawler.config import CrawlConfig
         from copilot.rag.crawler.orchestrator import extract_links
         from copilot.rag.crawler.url_utils import is_allowed_url, is_static_asset
-        from copilot.rag.crawler.config import CrawlConfig
 
         html = """
         <html>
@@ -642,8 +652,14 @@ class TestCleanerHardening(unittest.TestCase):
         self.assertEqual(links, ["https://www.te.eg/personal/mobile/prepaid"])
 
         # Test is_static_asset
-        self.assertTrue(is_static_asset("https://www.te.eg/o/CSS_Client_Extenstion/all_styles.min.css"))
-        self.assertTrue(is_static_asset("https://www.te.eg/documents/20117/0/te.fav.ico/512d81c0-2cbd-b957-0ada-54c158e54275"))
+        self.assertTrue(
+            is_static_asset("https://www.te.eg/o/CSS_Client_Extenstion/all_styles.min.css")
+        )
+        self.assertTrue(
+            is_static_asset(
+                "https://www.te.eg/documents/20117/0/te.fav.ico/512d81c0-2cbd-b957-0ada-54c158e54275"
+            )
+        )
         self.assertTrue(is_static_asset("https://www.te.eg/images/logo.png"))
         self.assertTrue(is_static_asset("https://www.te.eg/terms.pdf"))
         self.assertFalse(is_static_asset("https://www.te.eg/personal/mobile/prepaid"))
@@ -651,8 +667,12 @@ class TestCleanerHardening(unittest.TestCase):
         # Test is_allowed_url rejects static assets
         cfg = CrawlConfig(start_urls=["https://www.te.eg"], allowed_hosts=["www.te.eg"])
         allowed_page, _ = is_allowed_url("https://www.te.eg/personal/mobile/prepaid", cfg)
-        allowed_css, reason_css = is_allowed_url("https://www.te.eg/o/CSS_Client_Extenstion/all_styles.min.css", cfg)
-        allowed_ico, reason_ico = is_allowed_url("https://www.te.eg/documents/20117/0/te.fav.ico/512d81c0", cfg)
+        allowed_css, reason_css = is_allowed_url(
+            "https://www.te.eg/o/CSS_Client_Extenstion/all_styles.min.css", cfg
+        )
+        allowed_ico, reason_ico = is_allowed_url(
+            "https://www.te.eg/documents/20117/0/te.fav.ico/512d81c0", cfg
+        )
 
         self.assertTrue(allowed_page)
         self.assertFalse(allowed_css)

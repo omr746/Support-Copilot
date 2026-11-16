@@ -16,9 +16,11 @@ from urllib.parse import urljoin
 
 try:
     import structlog
+
     logger: Any = structlog.get_logger("copilot.rag.crawler")
 except ImportError:
     import logging
+
     logger = logging.getLogger("copilot.rag.crawler")
 
 from copilot.rag.crawler.cleaner import CLEANER_VERSION, clean_html
@@ -39,7 +41,6 @@ from copilot.rag.crawler.models import (
 from copilot.rag.crawler.robots import RobotsPolicy
 from copilot.rag.crawler.snapshot import SnapshotStore
 from copilot.rag.crawler.url_utils import is_allowed_url, is_static_asset, normalize_url
-
 
 # Regex to extract URL targets from common client-side click handlers (e.g. Liferay buttonClick)
 ONCLICK_NAV_RE = re.compile(
@@ -96,7 +97,9 @@ class _HTMLLinkParser(HTMLParser):
                 match = ONCLICK_NAV_RE.search(val_clean)
                 if match:
                     target_url = match.group(1).strip()
-                    if target_url and not target_url.startswith(("#", "javascript:", "mailto:", "tel:")):
+                    if target_url and not target_url.startswith(
+                        ("#", "javascript:", "mailto:", "tel:")
+                    ):
                         self.links.append(target_url)
 
 
@@ -461,7 +464,10 @@ class CrawlOrchestrator:
                             duration_ms=duration_ms,
                         )
                     else:
-                        if prev_version.cleaner_version != CLEANER_VERSION and prev_version.raw_html:
+                        if (
+                            prev_version.cleaner_version != CLEANER_VERSION
+                            and prev_version.raw_html
+                        ):
                             summary.changed += 1
                             outcome = "changed"
                         else:

@@ -13,9 +13,14 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
-from copilot.rag.fingerprint import ChunkerConfig, EmbedderConfig, PipelineFingerprint, canonical_json
+from copilot.rag.fingerprint import (
+    ChunkerConfig,
+    EmbedderConfig,
+    PipelineFingerprint,
+)
 from copilot.rag.models import Chunk, ChunkInput, PageVersion
 from copilot.rag.normalize import NORMALIZER_VERSION, normalize_search_text
 from copilot.rag.tokens import TokenCounter
@@ -236,14 +241,14 @@ def extract_overlap_tail(text: str, max_overlap_tokens: int, token_counter: Toke
     min_tokens = max(1, max_overlap_tokens // 2)
 
     for m in re.finditer(r"[.!?؟]\s+", candidate_text):
-        tail = candidate_text[m.end():]
+        tail = candidate_text[m.end() :]
         tail_tokens = token_counter.count_tokens(tail)
         if min_tokens <= tail_tokens <= max_overlap_tokens:
             return tail
 
     # Check for clause boundary (، ; ؛ , followed by whitespace)
     for m in re.finditer(r"[،;,؛]\s+", candidate_text):
-        tail = candidate_text[m.end():]
+        tail = candidate_text[m.end() :]
         tail_tokens = token_counter.count_tokens(tail)
         if min_tokens <= tail_tokens <= max_overlap_tokens:
             return tail
@@ -258,7 +263,11 @@ def extract_overlap_tail(text: str, max_overlap_tokens: int, token_counter: Toke
         if len(spans_tail) <= 1:
             break
         cut = spans_tail[1][0]
-        if cut < len(clean_tail) and not clean_tail[cut - 1].isspace() and not clean_tail[cut].isspace():
+        if (
+            cut < len(clean_tail)
+            and not clean_tail[cut - 1].isspace()
+            and not clean_tail[cut].isspace()
+        ):
             nxt = clean_tail.find(" ", cut)
             if nxt != -1:
                 while nxt < len(clean_tail) and clean_tail[nxt].isspace():
@@ -554,8 +563,7 @@ def chunk_section_slices(
 
                 # Recount check on full embedding input: non-additive tokenizers shrink overlap if over budget
                 while (
-                    overlap_start < p_start
-                    and _count_embedding_tokens(candidate_text) > max_limit
+                    overlap_start < p_start and _count_embedding_tokens(candidate_text) > max_limit
                 ):
                     tail_spans = token_counter.token_spans(body[overlap_start:prev_end])
                     if len(tail_spans) <= 1:
@@ -780,9 +788,7 @@ def chunk_page(
     global_index = 0
 
     for section in sections:
-        slices = chunk_section_slices(
-            section, token_counter, cfg, embedder_config=embedder_config
-        )
+        slices = chunk_section_slices(section, token_counter, cfg, embedder_config=embedder_config)
         for s in slices:
             norm_text = normalize_search_text(s.text)
             # Skip chunks where normalized search text is empty (e.g. diacritics/whitespace only)

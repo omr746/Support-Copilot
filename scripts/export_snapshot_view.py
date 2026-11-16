@@ -19,8 +19,7 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from copilot.rag.crawler.cleaner import CLEANER_VERSION, clean_html
-from copilot.rag.crawler.snapshot import SnapshotStore
+from copilot.rag.crawler.cleaner import CLEANER_VERSION, clean_html  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -124,28 +123,34 @@ def format_page_markdown(
     if cleaned_text:
         lines.append(cleaned_text)
     else:
-        lines.append("*(No cleaned text — page is empty, removed, or client-rendered JavaScript shell)*")
+        lines.append(
+            "*(No cleaned text — page is empty, removed, or client-rendered JavaScript shell)*"
+        )
 
     if compare_cleaner and raw_html:
         new_cleaned = clean_html(raw_html, url, base_url="https://www.te.eg")
-        lines.extend([
-            "",
-            "---",
-            "",
-            f"### Re-Cleaned Text (Current Rules: {CLEANER_VERSION})",
-            "",
-            f"- **New Extractor**: {new_cleaned.extractor}",
-            f"- **New Content Hash**: {new_cleaned.content_hash or '(empty)'}",
-            f"- **New Needs JS**: {new_cleaned.needs_js}",
-            "",
-            new_cleaned.cleaned_text or "*(Re-cleaned output is empty / JS shell)*",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                f"### Re-Cleaned Text (Current Rules: {CLEANER_VERSION})",
+                "",
+                f"- **New Extractor**: {new_cleaned.extractor}",
+                f"- **New Content Hash**: {new_cleaned.content_hash or '(empty)'}",
+                f"- **New Needs JS**: {new_cleaned.needs_js}",
+                "",
+                new_cleaned.cleaned_text or "*(Re-cleaned output is empty / JS shell)*",
+            ]
+        )
 
-    lines.extend([
-        "",
-        "=" * 80,
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "=" * 80,
+            "",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -216,10 +221,14 @@ def export_snapshot(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Export snapshot pages as clear, formatted Markdown.")
+    parser = argparse.ArgumentParser(
+        description="Export snapshot pages as clear, formatted Markdown."
+    )
     parser.add_argument("--snapshot", "-s", help="Snapshot ID (default: active snapshot)")
     parser.add_argument("--output", "-o", help="Output markdown file path")
-    parser.add_argument("--split-files", action="store_true", help="Also save individual page .md files")
+    parser.add_argument(
+        "--split-files", action="store_true", help="Also save individual page .md files"
+    )
     parser.add_argument(
         "--compare",
         action="store_true",

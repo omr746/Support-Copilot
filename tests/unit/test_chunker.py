@@ -18,27 +18,25 @@ Covers all 12 specification rules:
 from __future__ import annotations
 
 import copy
-import hashlib
 import random
 import string
 import unittest
 
+from bs4 import BeautifulSoup
+
 from copilot.rag.chunker import (
     CHUNKER_SETTINGS,
     Section,
-    chunk_hash,
-    chunk_id,
     chunk_page,
     chunk_section,
     extract_overlap_tail,
     format_embedding_input,
     parse_sections,
 )
-from copilot.rag.fingerprint import ChunkerConfig, EmbedderConfig, PipelineFingerprint
 from copilot.rag.crawler.cleaner import _clean_with_beautifulsoup
-from bs4 import BeautifulSoup
-from copilot.rag.models import Chunk, ChunkInput, PageVersion
-from copilot.rag.normalize import NORMALIZER_VERSION, normalize_search_text
+from copilot.rag.fingerprint import ChunkerConfig, EmbedderConfig, PipelineFingerprint
+from copilot.rag.models import ChunkInput, PageVersion
+from copilot.rag.normalize import NORMALIZER_VERSION
 from copilot.rag.tokens import WhitespaceTokenCounter
 from tests.fakes.fake_token_counter import FakeCharTokenCounter
 
@@ -74,7 +72,10 @@ class TestChunker(unittest.TestCase):
         # Property test: random strings of words
         random.seed(42)
         for _ in range(10):
-            words = ["".join(random.choices(string.ascii_letters, k=random.randint(3, 10))) for _ in range(500)]
+            words = [
+                "".join(random.choices(string.ascii_letters, k=random.randint(3, 10)))
+                for _ in range(500)
+            ]
             text = " ".join(words)
             rnd_sec = Section(ordinal=0, path="Random", body=text)
             rnd_chunks = chunk_section(rnd_sec, self.counter, settings)
@@ -121,7 +122,9 @@ class TestChunker(unittest.TestCase):
         self.assertTrue(sec1_chunks[0].text.startswith("Sentence one"))
 
         # Subsequent chunk in section 1 must contain tail words of prior chunk
-        prior_tail = extract_overlap_tail(sec1_chunks[0].text, settings["overlap_tokens"], self.counter)
+        prior_tail = extract_overlap_tail(
+            sec1_chunks[0].text, settings["overlap_tokens"], self.counter
+        )
         self.assertTrue(sec1_chunks[1].text.startswith(prior_tail))
 
         # First chunk of section 2 must NOT have overlap from section 1
@@ -148,7 +151,9 @@ class TestChunker(unittest.TestCase):
         # Reconstruct by stripping overlap prefix from subsequent chunks
         recovered_parts: list[str] = [raw_chunks[0]]
         for i in range(1, len(raw_chunks)):
-            prev_tail = extract_overlap_tail(raw_chunks[i - 1], settings["overlap_tokens"], self.counter)
+            prev_tail = extract_overlap_tail(
+                raw_chunks[i - 1], settings["overlap_tokens"], self.counter
+            )
             chunk_txt = raw_chunks[i]
             if prev_tail and chunk_txt.startswith(prev_tail):
                 stripped = chunk_txt[len(prev_tail) :].strip()
@@ -174,7 +179,9 @@ class TestChunker(unittest.TestCase):
             cleaned_text="# دليل الاستخدام\nمحتوى توضيحي للدليل.",
         )
 
-        chunks = chunk_page(page, self.counter, source_type="builtin", owner_id=None, source_id="src-1")
+        chunks = chunk_page(
+            page, self.counter, source_type="builtin", owner_id=None, source_id="src-1"
+        )
         self.assertEqual(len(chunks), 1)
         c = chunks[0]
 
@@ -263,16 +270,11 @@ class TestChunker(unittest.TestCase):
                 cleaned_text=text,
             )
             chunks = chunk_page(page, self.counter)
-            self.assertEqual(chunks, [], f"Expected [] for input: {repr(text)}")
+            self.assertEqual(chunks, [], f"Expected [] for input: {text!r}")
 
     def test_rule_8_short_sections_never_merged_across_headings(self) -> None:
         """A short section is one chunk, even if tiny. Chunks never cross a heading."""
-        text = (
-            "# Chapter 1\n"
-            "Tiny one.\n\n"
-            "# Chapter 2\n"
-            "Tiny two."
-        )
+        text = "# Chapter 1\nTiny one.\n\n# Chapter 2\nTiny two."
         sections = parse_sections(text, default_title="Book")
         self.assertEqual(len(sections), 2)
         self.assertEqual(sections[0].path, "Chapter 1")
@@ -331,7 +333,7 @@ class TestChunker(unittest.TestCase):
         chunks2 = chunk_page(page2, self.counter)
 
         self.assertEqual(len(chunks1), len(chunks2))
-        for c1, c2 in zip(chunks1, chunks2):
+        for c1, c2 in zip(chunks1, chunks2, strict=True):
             self.assertEqual(c1.id, c2.id)
             self.assertEqual(c1.chunk_hash, c2.chunk_hash)
             self.assertEqual(c1.text, c2.text)
@@ -392,12 +394,12 @@ class TestChunker(unittest.TestCase):
         chunks2 = chunk_page(p2, self.counter, settings)
 
         # Intro and Conclusion chunk hashes MUST remain completely identical
-        intro_c1 = [c for c in chunks1 if c.section_path == "Intro"][0]
-        intro_c2 = [c for c in chunks2 if c.section_path == "Intro"][0]
+        intro_c1 = next(c for c in chunks1 if c.section_path == "Intro")
+        intro_c2 = next(c for c in chunks2 if c.section_path == "Intro")
         self.assertEqual(intro_c1.chunk_hash, intro_c2.chunk_hash)
 
-        conc_c1 = [c for c in chunks1 if c.section_path == "Conclusion"][0]
-        conc_c2 = [c for c in chunks2 if c.section_path == "Conclusion"][0]
+        conc_c1 = next(c for c in chunks1 if c.section_path == "Conclusion")
+        conc_c2 = next(c for c in chunks2 if c.section_path == "Conclusion")
         self.assertEqual(conc_c1.chunk_hash, conc_c2.chunk_hash)
 
         # In Details: the first chunk containing sentence alpha changed

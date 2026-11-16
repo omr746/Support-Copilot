@@ -50,26 +50,30 @@ _DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u06
 _ALEF_RE = re.compile(r"[\u0622\u0623\u0625\u0671]")
 
 # Rule 5 & 6: Alef maksura (ى), Persian yeh (ی) -> yaa (ي); Persian keheh (ک) -> kaf (ك); taa marbuta (ة) -> haa (ه)
-_LETTERS_TRANS = str.maketrans({
-    "ى": "ي",
-    "ی": "ي",
-    "ک": "ك",
-    "ة": "ه",
-})
+_LETTERS_TRANS = str.maketrans(
+    {
+        "ى": "ي",
+        "ی": "ي",
+        "ک": "ك",
+        "ة": "ه",
+    }
+)
 
 # Rule 7: Arabic-Indic & Persian digits -> ASCII digits
 _DIGITS_TRANS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
 
 # Rule 8: Arabic punctuation, decimal, thousands separators & percent signs -> ASCII
-_PUNCT_TRANS = str.maketrans({
-    "؟": "?",
-    "،": ",",
-    "؛": ";",
-    "٫": ".",  # Arabic decimal separator (U+066B)
-    "٬": ",",  # Arabic thousands separator (U+066C)
-    "٪": "%",  # Arabic percent sign (U+066A)
-    "۔": ".",  # Arabic full stop (U+06D4)
-})
+_PUNCT_TRANS = str.maketrans(
+    {
+        "؟": "?",
+        "،": ",",
+        "؛": ";",
+        "٫": ".",  # Arabic decimal separator (U+066B)
+        "٬": ",",  # Arabic thousands separator (U+066C)
+        "٪": "%",  # Arabic percent sign (U+066A)
+        "۔": ".",  # Arabic full stop (U+06D4)
+    }
+)
 
 # Rule 10: Horizontal whitespace runs (compiled once at module level for optimal performance)
 _SPACES_RE = re.compile(r"[ \t]+")

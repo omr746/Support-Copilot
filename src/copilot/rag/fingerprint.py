@@ -25,7 +25,9 @@ def canonical_json(data: dict[str, Any]) -> str:
 
     Enforces allow_nan=False and compact separators to ensure cross-platform stability.
     """
-    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    return json.dumps(
+        data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
 
 
 def compute_pattern_version(source: str | bytes | Path) -> str:
@@ -63,7 +65,9 @@ class ChunkerConfig:
         if type(self.target_tokens) is not int or self.target_tokens <= 0:
             raise ValueError(f"target_tokens must be a positive int, got {self.target_tokens!r}")
         if type(self.overlap_tokens) is not int or self.overlap_tokens < 0:
-            raise ValueError(f"overlap_tokens must be a non-negative int, got {self.overlap_tokens!r}")
+            raise ValueError(
+                f"overlap_tokens must be a non-negative int, got {self.overlap_tokens!r}"
+            )
 
         # Invariant: target + overlap <= max so overlap prefix never forces chunk over the limit
         if self.target_tokens + self.overlap_tokens > self.max_tokens:
@@ -83,7 +87,9 @@ class ChunkerConfig:
         object.__setattr__(self, "separators", tuple(self.separators))
 
         if not isinstance(self.section_path_in_embedding, bool):
-            raise ValueError(f"section_path_in_embedding must be a bool, got {self.section_path_in_embedding!r}")
+            raise ValueError(
+                f"section_path_in_embedding must be a bool, got {self.section_path_in_embedding!r}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to canonical dictionary."""
@@ -161,7 +167,9 @@ class EmbedderConfig:
         if not isinstance(self.pooling, str) or not self.pooling:
             raise ValueError(f"pooling must be a non-empty string, got {self.pooling!r}")
         if not isinstance(self.normalize_embeddings, bool):
-            raise ValueError(f"normalize_embeddings must be a bool, got {self.normalize_embeddings!r}")
+            raise ValueError(
+                f"normalize_embeddings must be a bool, got {self.normalize_embeddings!r}"
+            )
         if not isinstance(self.query_prefix, str):
             raise ValueError(f"query_prefix must be a str, got {self.query_prefix!r}")
         if not isinstance(self.passage_prefix, str):
@@ -246,17 +254,30 @@ class PipelineFingerprint:
 
     def __post_init__(self) -> None:
         if not isinstance(self.cleaner_version, str) or not self.cleaner_version:
-            raise ValueError(f"cleaner_version must be a non-empty string, got {self.cleaner_version!r}")
+            raise ValueError(
+                f"cleaner_version must be a non-empty string, got {self.cleaner_version!r}"
+            )
         if not isinstance(self.normalizer_version, str) or not self.normalizer_version:
-            raise ValueError(f"normalizer_version must be a non-empty string, got {self.normalizer_version!r}")
+            raise ValueError(
+                f"normalizer_version must be a non-empty string, got {self.normalizer_version!r}"
+            )
         if not isinstance(self.chunker_config, ChunkerConfig):
-            raise ValueError(f"chunker_config must be ChunkerConfig instance, got {type(self.chunker_config)}")
-        if not isinstance(self.injection_pattern_version, str) or not self.injection_pattern_version:
+            raise ValueError(
+                f"chunker_config must be ChunkerConfig instance, got {type(self.chunker_config)}"
+            )
+        if (
+            not isinstance(self.injection_pattern_version, str)
+            or not self.injection_pattern_version
+        ):
             raise ValueError(
                 f"injection_pattern_version must be a non-empty string, got {self.injection_pattern_version!r}"
             )
-        if self.embedder_config is not None and not isinstance(self.embedder_config, EmbedderConfig):
-            raise ValueError(f"embedder_config must be EmbedderConfig or None, got {type(self.embedder_config)}")
+        if self.embedder_config is not None and not isinstance(
+            self.embedder_config, EmbedderConfig
+        ):
+            raise ValueError(
+                f"embedder_config must be EmbedderConfig or None, got {type(self.embedder_config)}"
+            )
 
         # Cross-check: chunker limit must never exceed embedder sequence length
         if self.embedder_config is not None:
@@ -385,7 +406,11 @@ class PipelineFingerprint:
                     f"recomputed digest ({fp.embedder_digest})"
                 )
 
-        if "full_digest" in data and data["full_digest"] is not None and fp.embedder_config is not None:
+        if (
+            "full_digest" in data
+            and data["full_digest"] is not None
+            and fp.embedder_config is not None
+        ):
             if data["full_digest"] != fp.full_digest:
                 raise ValueError(
                     f"Stored full_digest ({data['full_digest']}) does not match "

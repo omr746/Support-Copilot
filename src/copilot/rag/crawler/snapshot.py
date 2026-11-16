@@ -448,7 +448,8 @@ class SnapshotStore:
                 str(page.needs_js),
                 "",
                 "### Chunker Status",
-                f"**{eligibility_label}**" + (f" (needs_js={page.needs_js})" if page.needs_js else ""),
+                f"**{eligibility_label}**"
+                + (f" (needs_js={page.needs_js})" if page.needs_js else ""),
                 "",
                 "---",
                 "",
@@ -459,22 +460,32 @@ class SnapshotStore:
             if is_eligible:
                 page_blocks.append(page.cleaned_text.strip())
             else:
-                reason = "Client-rendered JavaScript shell (needs_js=True)" if page.needs_js else (
-                    "Page marked removed" if page.is_removed else "Empty or non-200 HTTP status"
+                reason = (
+                    "Client-rendered JavaScript shell (needs_js=True)"
+                    if page.needs_js
+                    else (
+                        "Page marked removed" if page.is_removed else "Empty or non-200 HTTP status"
+                    )
                 )
                 page_blocks.append(f"*(Not sent to chunker: {reason})*")
 
-            page_blocks.extend([
-                "",
-                "=" * 80,
-                "",
-            ])
+            page_blocks.extend(
+                [
+                    "",
+                    "=" * 80,
+                    "",
+                ]
+            )
 
             page_content = "\n".join(page_blocks)
             summary_lines.append(page_content)
 
             # Write individual page file
-            slug = re.sub(r"[^\w\s-]", "", page.title or f"page_{idx}", flags=re.UNICODE).strip().lower()
+            slug = (
+                re.sub(r"[^\w\s-]", "", page.title or f"page_{idx}", flags=re.UNICODE)
+                .strip()
+                .lower()
+            )
             slug = re.sub(r"[-\s]+", "_", slug)[:50] or f"page_{idx}"
             single_file = clean_pages_dir / f"{idx:03d}_{slug}.md"
             single_file.write_text(page_content, encoding="utf-8")

@@ -14,7 +14,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlsplit
 
-from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, Tag
 
 from copilot.rag.crawler.url_utils import is_allowed_url, normalize_url
 
@@ -42,11 +42,7 @@ def _resolve_cleaner_version() -> str:
             traf_ver = version("trafilatura")
         except (PackageNotFoundError, Exception):
             traf_ver = "unknown"
-        return (
-            f"trafilatura-{traf_ver}"
-            f"+{TRAFILATURA_RULE_VERSION}"
-            f"+{BS4_RULE_VERSION}"
-        )
+        return f"trafilatura-{traf_ver}+{TRAFILATURA_RULE_VERSION}+{BS4_RULE_VERSION}"
     return f"bs4-only+{BS4_RULE_VERSION}"
 
 
@@ -307,9 +303,28 @@ def passes_quality_gate(text: str) -> bool:
     if ("product" in low or "منتج" in low) and ("compar" in low or "مقارن" in low):
         words_set = set(re.findall(r"[\u0600-\u06FF\w]+", low))
         comparison_junk = {
-            "products", "product", "comparison", "compare", "cleared", "sorry",
-            "منتجات", "منتج", "محو", "مقارنة", "المقارنة", "يوجد", "لا", "التي", "يتم",
-            "are", "there", "no", "to", "in", "will", "be"
+            "products",
+            "product",
+            "comparison",
+            "compare",
+            "cleared",
+            "sorry",
+            "منتجات",
+            "منتج",
+            "محو",
+            "مقارنة",
+            "المقارنة",
+            "يوجد",
+            "لا",
+            "التي",
+            "يتم",
+            "are",
+            "there",
+            "no",
+            "to",
+            "in",
+            "will",
+            "be",
         }
         if len(words_set - comparison_junk) <= 3:
             return False
@@ -398,7 +413,9 @@ def is_boilerplate_element(el: Any) -> bool:
         if class_set & EXACT_BOILERPLATE_CLASSES:
             return True
         for c in class_set:
-            if "compare" in c and any(w in c for w in ("modal", "basket", "widget", "tray", "cards", "page-cards")):
+            if "compare" in c and any(
+                w in c for w in ("modal", "basket", "widget", "tray", "cards", "page-cards")
+            ):
                 return True
             if any(
                 k in c
@@ -443,10 +460,13 @@ def is_site_level_header(header: Tag) -> bool:
     if role and str(role).lower() == "banner":
         return True
 
-    classes = header.get("class") or []
-    if isinstance(classes, str):
-        classes = classes.split()
-    classes_set = {c.lower() for c in classes}
+    raw_classes = header.get("class")
+    classes: list[Any] = (
+        raw_classes
+        if isinstance(raw_classes, list)
+        else (raw_classes.split() if isinstance(raw_classes, str) else [])
+    )
+    classes_set = {str(c).lower() for c in classes}
     if {"site-header", "main-header", "header-nav", "navbar", "page-header"} & classes_set:
         return True
 
@@ -469,18 +489,26 @@ def is_boilerplate_form(form: Tag) -> bool:
         return True
 
     fid = form.get("id") or ""
-    fclasses = form.get("class") or []
-    if isinstance(fclasses, str):
-        fclasses = fclasses.split()
-    identifiers = [fid] + list(fclasses)
+    raw_fclasses = form.get("class")
+    fclasses: list[Any] = (
+        raw_fclasses
+        if isinstance(raw_fclasses, list)
+        else (raw_fclasses.split() if isinstance(raw_fclasses, str) else [])
+    )
+    identifiers = [fid, *fclasses]
     for ident in identifiers:
         ident_low = str(ident).lower()
-        if any(keyword in ident_low for keyword in ("search", "login", "auth", "newsletter", "subscribe")):
+        if any(
+            keyword in ident_low
+            for keyword in ("search", "login", "auth", "newsletter", "subscribe")
+        ):
             return True
 
     # If form only contains search/submit inputs with no substantive text or tables
     inputs = form.find_all("input")
-    if inputs and all(inp.get("type", "").lower() in ("search", "hidden", "submit") for inp in inputs):
+    if inputs and all(
+        str(inp.get("type") or "").lower() in ("search", "hidden", "submit") for inp in inputs
+    ):
         if not form.find(["p", "h1", "h2", "h3", "h4", "h5", "h6", "table", "label", "legend"]):
             return True
 
@@ -516,9 +544,7 @@ def _extract_list(list_elem: Tag, depth: int = 0) -> list[str]:
                 nested_sublists.append(sublist)
 
         nested_ids = {
-            id(sub)
-            for sublist in nested_sublists
-            for sub in [sublist] + sublist.find_all(True)
+            id(sub) for sublist in nested_sublists for sub in [sublist, *sublist.find_all(True)]
         }
 
         # Extract direct text of this <li> excluding strings inside nested sub-lists
@@ -550,7 +576,7 @@ def _extract_table(table_elem: Tag) -> list[str]:
     table level, preventing rows or cells from being mixed up.
     """
     nested_tables = [t for t in table_elem.find_all("table") if t is not table_elem]
-    nested_ids = {id(n) for sub in nested_tables for n in [sub] + sub.find_all(True)}
+    nested_ids = {id(n) for sub in nested_tables for n in [sub, *sub.find_all(True)]}
 
     direct_trs: list[Tag] = []
     for tr in table_elem.find_all("tr"):
@@ -712,7 +738,9 @@ def _clean_with_beautifulsoup(soup: BeautifulSoup) -> str:
             form.decompose()
         else:
             # Strip submit buttons / hidden inputs inside content forms
-            for btn in list(form.find_all(["button", "input"], type=re.compile(r"^(submit|hidden)$", re.I))):
+            for btn in list(
+                form.find_all(["button", "input"], type=re.compile(r"^(submit|hidden)$", re.I))
+            ):
                 btn.decompose()
 
     # 6. Target main content area if available
@@ -733,9 +761,20 @@ def _clean_with_beautifulsoup(soup: BeautifulSoup) -> str:
 
     for elem in main_content.find_all(  # type: ignore[union-attr]
         [
-            "h1", "h2", "h3", "h4", "h5", "h6",
-            "p", "ul", "ol", "table", "blockquote", "pre",
-            "legend", "label",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "ul",
+            "ol",
+            "table",
+            "blockquote",
+            "pre",
+            "legend",
+            "label",
         ]
     ):
         if id(elem) in handled_ids:
@@ -882,7 +921,7 @@ def clean_html(
 
     # 6. Check for JavaScript-only shell using multi-signal analysis
     needs_js = is_javascript_shell(cleaned_text, raw_html, body_text=body_text)
-    if needs_js and not cleaned_text.strip():
+    if needs_js:
         cleaned_text = ""
         extractor = "none"
 

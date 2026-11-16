@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import re
 import unittest
+
 from copilot.rag.normalize import (
-    NORMALIZER_VERSION,
     _SPACES_RE,
+    NORMALIZER_VERSION,
     normalize_search_text,
 )
 
@@ -137,20 +138,37 @@ class TestNormalizeSearchText(unittest.TestCase):
             "شركة التقنية المتقدمة؛ 2026",
             "مؤتمر ومسؤولية ورئيس\r\n\t\tخطوات عمل جديدة\n",
             "کمک به فارسی و عربی ١٬٠٠٠۔",
-            "STRAßE Ωμέγα \u0390 \u1F56 \u2126",
+            "STRAßE Ωμέγα \u0390 \u1f56 \u2126",
             "line1\u2028line2\u2029line3\vline4\fline5",
             "\ufeffك\u0654ت\u0653ب\u0655 \u200b\u200cم\u0610ح\u06d6م\u06dfد",
         ]
         for s in samples:
             norm1 = normalize_search_text(s)
             norm2 = normalize_search_text(norm1)
-            self.assertEqual(norm1, norm2, f"Idempotence failed for sample: {repr(s)}")
+            self.assertEqual(norm1, norm2, f"Idempotence failed for sample: {s!r}")
 
     def test_idempotence_unicode_troublemakers(self) -> None:
         """Verify idempotence on characters whose casefold alters NFKC decomposition."""
         troublemakers = [
-            "\xa0", "¨", "ª", "¯", "²", "³", "´", "µ", "¹", "º", "¼", "½", "¾",
-            "\u0390", "\u1F56", "\u2126", "\uFB01", "\uFB02", "\u1E9E",
+            "\xa0",
+            "¨",
+            "ª",
+            "¯",
+            "²",
+            "³",
+            "´",
+            "µ",
+            "¹",
+            "º",
+            "¼",
+            "½",
+            "¾",
+            "\u0390",
+            "\u1f56",
+            "\u2126",
+            "\ufb01",
+            "\ufb02",
+            "\u1e9e",
         ]
         for ch in troublemakers:
             norm1 = normalize_search_text(ch)
