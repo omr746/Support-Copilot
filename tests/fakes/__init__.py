@@ -1,6 +1,20 @@
 """Test doubles (fakes) for external service ports."""
 
-from tests.fakes.fake_llm import FakeLLM
-from tests.fakes.fake_sleeper import FakeSleeper
+try:
+    from tests.fakes.fake_llm import FakeLLM
+except ImportError:
+    pass
 
-__all__ = ["FakeLLM", "FakeSleeper"]
+try:
+    from tests.fakes.fake_sleeper import FakeSleeper
+except ImportError:
+    pass
+
+from tests.fakes.fake_token_counter import FakeCharTokenCounter, FakeWordTokenCounter
+
+__all__ = [
+    "FakeCharTokenCounter",
+    "FakeLLM",
+    "FakeSleeper",
+    "FakeWordTokenCounter",
+]
