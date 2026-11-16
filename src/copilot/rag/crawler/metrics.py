@@ -7,11 +7,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
-import structlog
-
 from copilot.rag.crawler.url_utils import hash_path
 
-logger = structlog.get_logger("copilot.rag.crawler")
+try:
+    import structlog
+    logger: Any = structlog.get_logger("copilot.rag.crawler")
+except ImportError:
+    import logging
+    logger = logging.getLogger("copilot.rag.crawler")
 
 # --- OpenTelemetry Metrics Initialization with Graceful Fallback ---
 _meter = None

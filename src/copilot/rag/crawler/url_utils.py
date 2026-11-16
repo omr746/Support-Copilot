@@ -30,6 +30,73 @@ TRACKING_QUERY_PARAMS = {
     "mc_eid",
 }
 
+# Static non-HTML asset extensions to exclude from crawler navigation
+STATIC_ASSET_EXTENSIONS = {
+    # Styles, scripts, and source maps
+    ".css",
+    ".js",
+    ".mjs",
+    ".map",
+    # Images and icons
+    ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".bmp",
+    ".tiff",
+    # Fonts
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf",
+    # Audio / Video media
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".avi",
+    ".mov",
+    ".webm",
+    ".m4a",
+    ".flac",
+    # Archives, binaries, and documents
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".rar",
+    ".7z",
+    ".exe",
+    ".dmg",
+    ".bin",
+    ".iso",
+}
+
+
+def is_static_asset(url_or_path: str) -> bool:
+    """Check whether a URL or path points to a non-HTML static asset (CSS, JS, images, fonts, etc.)."""
+    parts = urlsplit(url_or_path)
+    path = parts.path.lower()
+    clean_path = path.rstrip("/")
+
+    # Check trailing filename extension
+    if "." in clean_path:
+        ext = "." + clean_path.rsplit(".", 1)[1]
+        if ext in STATIC_ASSET_EXTENSIONS:
+            return True
+
+    # Check for embedded asset extensions across path segments (e.g. Liferay /te.fav.ico/<uuid>)
+    for segment in path.split("/"):
+        if "." in segment:
+            ext = "." + segment.rsplit(".", 1)[1]
+            if ext in STATIC_ASSET_EXTENSIONS:
+                return True
+
+    return False
+
 
 def normalize_url(url: str, *, strip_tracking: bool = True, strip_all_query: bool = False) -> str:
     """Normalize URL by stripping fragments, tracking parameters, and standardizing host/path.
@@ -94,6 +161,10 @@ def is_allowed_url(url: str, config: CrawlConfig) -> tuple[bool, str]:
     # Check host allowlist
     if config.allowed_hosts and host not in config.allowed_hosts:
         return False, f"Host '{host}' is not in allowed_hosts: {config.allowed_hosts}"
+
+    # Check static asset exclusion
+    if is_static_asset(parts.path):
+        return False, f"URL path '{parts.path}' is a static asset"
 
     # Check path prefixes
     path = parts.path or "/"

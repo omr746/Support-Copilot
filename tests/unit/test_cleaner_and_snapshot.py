@@ -117,8 +117,11 @@ def test_javascript_only_shell_flagged_needs_js(js_shell_html: str) -> None:
 
 
 def test_cleaner_version_contains_actual_installed_version() -> None:
-    """CLEANER_VERSION records the true installed library version and BS4 rule version."""
-    assert "+bs4-v1.0" in CLEANER_VERSION
+    """CLEANER_VERSION records the true installed library version and BS4/Trafilatura rule versions."""
+    from copilot.rag.crawler.cleaner import BS4_RULE_VERSION, TRAFILATURA_RULE_VERSION
+
+    assert f"+{BS4_RULE_VERSION}" in CLEANER_VERSION
+    assert f"+{TRAFILATURA_RULE_VERSION}" in CLEANER_VERSION or "bs4-only+" in CLEANER_VERSION
     assert CLEANER_VERSION.startswith(("trafilatura-", "bs4-only+"))
 
 

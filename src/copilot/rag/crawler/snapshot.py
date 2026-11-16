@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import uuid
 from collections.abc import Sequence
@@ -14,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from copilot.rag.crawler.cleaner import clean_html
+from copilot.rag.crawler.cleaner import CLEANER_VERSION, clean_html
 from copilot.rag.crawler.client import CrawlResponse
 from copilot.rag.crawler.config import CrawlConfig
 from copilot.rag.crawler.models import (
@@ -109,15 +110,66 @@ class SnapshotStore:
             # 1. Handle 304 Not Modified / Unchanged
             if status_code == 304 or is_unchanged:
                 prev_version = previous_by_url.get(norm_url)
-                if prev_version:
-                    current_pages[prev_version.canonical_url] = dataclasses.replace(
-                        prev_version, last_verified_at=now_iso
-                    )
-                else:
+                if not prev_version:
                     logger.warning(
                         "Received 304/unchanged for '%s' with no previous version in snapshot. Skipping.",
                         norm_url,
                     )
+                    continue
+
+                # Case A: Cleaner version matches current rules -> reuse existing PageVersion
+                if prev_version.cleaner_version == CLEANER_VERSION:
+                    current_pages[prev_version.canonical_url] = dataclasses.replace(
+                        prev_version, last_verified_at=now_iso
+                    )
+                    continue
+
+                # Case B: Cleaner version changed and raw_html is preserved -> re-clean saved HTML
+                if prev_version.raw_html:
+                    logger.info(
+                        "Cleaner version updated (%s -> %s) on 304 for '%s'. Re-cleaning saved raw_html.",
+                        prev_version.cleaner_version,
+                        CLEANER_VERSION,
+                        norm_url,
+                    )
+                    cleaned = clean_html(prev_version.raw_html, norm_url, config=config)
+                    canonical = cleaned.canonical_url
+                    if config:
+                        allowed, _ = is_allowed_url(canonical, config)
+                        if not allowed:
+                            canonical = norm_url
+
+                    current_pages[canonical] = PageVersion(
+                        url=norm_url,
+                        canonical_url=canonical,
+                        title=cleaned.title,
+                        language=cleaned.language,
+                        fetched_at=now_iso,
+                        http_status=200,
+                        content_hash=cleaned.content_hash,
+                        cleaner_version=cleaned.cleaner_version,
+                        raw_html=prev_version.raw_html,
+                        cleaned_text=cleaned.cleaned_text,
+                        etag=etag or prev_version.etag,
+                        last_modified=last_modified or prev_version.last_modified,
+                        needs_js=cleaned.needs_js,
+                        is_removed=False,
+                        last_verified_at=now_iso,
+                        extractor=cleaned.extractor,
+                    )
+                    continue
+
+                # Case C: Cleaner version changed but raw_html is not preserved
+                logger.error(
+                    "Cleaner version updated (%s -> %s) on 304 for '%s', but raw_html is not preserved. "
+                    "Cannot re-clean without raw_html; full fetch required.",
+                    prev_version.cleaner_version,
+                    CLEANER_VERSION,
+                    norm_url,
+                )
+                current_pages[prev_version.canonical_url] = dataclasses.replace(
+                    prev_version, last_verified_at=now_iso
+                )
                 continue
 
             # 2. Handle 404 / 410 Gone
@@ -187,12 +239,13 @@ class SnapshotStore:
                 )
                 continue
 
-            # Check if unchanged from previous snapshot via content hash
+            # Check if unchanged from previous snapshot via content hash and cleaner version
             prev_version = previous_snapshot.pages.get(canonical) if previous_snapshot else None
             if (
                 prev_version
                 and prev_version.content_hash
                 and prev_version.content_hash == cleaned.content_hash
+                and prev_version.cleaner_version == cleaned.cleaner_version
                 and not prev_version.is_removed
             ):
                 current_pages[canonical] = dataclasses.replace(
@@ -217,6 +270,7 @@ class SnapshotStore:
                 needs_js=cleaned.needs_js,
                 is_removed=False,
                 last_verified_at=now_iso,
+                extractor=cleaned.extractor,
             )
 
         # Handle previous snapshot pages not present in current_pages
@@ -317,9 +371,13 @@ class SnapshotStore:
                         "last_verified_at": page.last_verified_at or page.fetched_at,
                         "cleaned_text": page.cleaned_text,
                         "raw_html": page.raw_html,
+                        "extractor": page.extractor,
                     }
                     line = json.dumps(page_data, ensure_ascii=False)
                     f.write(line + "\n")
+
+            # 3. Human-Readable Clean Pages View for Chunker Inspection
+            self._export_clean_pages_view(tmp_private_dir, snapshot)
 
             # Atomic directory placement
             os.replace(tmp_snap_dir, snap_dir)
@@ -332,6 +390,96 @@ class SnapshotStore:
         manifest_file = snap_dir / "manifest.jsonl"
         private_file = private_dir / "pages.jsonl"
         return manifest_file, private_file
+
+    @staticmethod
+    def _export_clean_pages_view(private_dir: Path, snapshot: Snapshot) -> None:
+        """Export clean human-readable Markdown view of the exact text going to the chunker."""
+        clean_md_file = private_dir / "pages_clean.md"
+        clean_pages_dir = private_dir / "pages_clean"
+        clean_pages_dir.mkdir(parents=True, exist_ok=True)
+
+        total = len(snapshot.pages)
+        summary_lines = [
+            f"# Snapshot Clean Pages View: `{snapshot.snapshot_id}`",
+            f"**Total Pages**: {total}  ",
+            f"**Created At**: `{snapshot.created_at}`  ",
+            "",
+            "---",
+            "",
+        ]
+
+        for idx, page in enumerate(snapshot.pages.values(), start=1):
+            is_eligible = (
+                not page.is_removed
+                and not page.needs_js
+                and page.http_status == 200
+                and bool(page.cleaned_text.strip())
+            )
+            eligibility_label = "Eligible for Chunker" if is_eligible else "Skipped from Chunker"
+
+            page_blocks = [
+                f"# [{idx} / {total}] {page.title or '(No title)'}",
+                "",
+                "### URL",
+                page.url,
+                "",
+                "### Canonical URL",
+                page.canonical_url,
+                "",
+                "### Title",
+                page.title or "(No title)",
+                "",
+                "### Language",
+                page.language,
+                "",
+                "### HTTP Status",
+                str(page.http_status),
+                "",
+                "### Cleaner Version",
+                page.cleaner_version,
+                "",
+                "### Extractor",
+                page.extractor or "not recorded",
+                "",
+                "### Content Hash",
+                page.content_hash or "(empty)",
+                "",
+                "### Needs JS",
+                str(page.needs_js),
+                "",
+                "### Chunker Status",
+                f"**{eligibility_label}**" + (f" (needs_js={page.needs_js})" if page.needs_js else ""),
+                "",
+                "---",
+                "",
+                "### Exact Text Sent to Chunker",
+                "",
+            ]
+
+            if is_eligible:
+                page_blocks.append(page.cleaned_text.strip())
+            else:
+                reason = "Client-rendered JavaScript shell (needs_js=True)" if page.needs_js else (
+                    "Page marked removed" if page.is_removed else "Empty or non-200 HTTP status"
+                )
+                page_blocks.append(f"*(Not sent to chunker: {reason})*")
+
+            page_blocks.extend([
+                "",
+                "=" * 80,
+                "",
+            ])
+
+            page_content = "\n".join(page_blocks)
+            summary_lines.append(page_content)
+
+            # Write individual page file
+            slug = re.sub(r"[^\w\s-]", "", page.title or f"page_{idx}", flags=re.UNICODE).strip().lower()
+            slug = re.sub(r"[-\s]+", "_", slug)[:50] or f"page_{idx}"
+            single_file = clean_pages_dir / f"{idx:03d}_{slug}.md"
+            single_file.write_text(page_content, encoding="utf-8")
+
+        clean_md_file.write_text("\n".join(summary_lines), encoding="utf-8")
 
     def get_active_snapshot_id(self) -> str | None:
         """Read the currently active snapshot ID from active.txt."""
@@ -413,6 +561,7 @@ class SnapshotStore:
                     needs_js=data.get("needs_js", False),
                     is_removed=data.get("is_removed", False),
                     last_verified_at=data.get("last_verified_at", data["fetched_at"]),
+                    extractor=data.get("extractor", ""),
                 )
                 pages[pv.canonical_url] = pv
         elif manifest_file.exists():
@@ -429,6 +578,7 @@ class SnapshotStore:
                     needs_js=data.get("needs_js", False),
                     is_removed=data.get("is_removed", False),
                     last_verified_at=data.get("last_verified_at", data["fetched_at"]),
+                    extractor=data.get("extractor", ""),
                 )
                 pages[pv.canonical_url] = pv
         else:

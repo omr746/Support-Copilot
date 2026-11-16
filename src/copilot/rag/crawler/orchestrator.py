@@ -5,16 +5,23 @@ from __future__ import annotations
 import collections
 import json
 import os
+import re
 import time
 import uuid
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin
 
-import structlog
+try:
+    import structlog
+    logger: Any = structlog.get_logger("copilot.rag.crawler")
+except ImportError:
+    import logging
+    logger = logging.getLogger("copilot.rag.crawler")
 
-from copilot.rag.crawler.cleaner import clean_html
+from copilot.rag.crawler.cleaner import CLEANER_VERSION, clean_html
 from copilot.rag.crawler.client import CrawlResponse, PoliteClient
 from copilot.rag.crawler.config import CrawlConfig
 from copilot.rag.crawler.errors import CrawlBlockedError
@@ -31,26 +38,66 @@ from copilot.rag.crawler.models import (
 )
 from copilot.rag.crawler.robots import RobotsPolicy
 from copilot.rag.crawler.snapshot import SnapshotStore
-from copilot.rag.crawler.url_utils import is_allowed_url, normalize_url
+from copilot.rag.crawler.url_utils import is_allowed_url, is_static_asset, normalize_url
 
-logger = structlog.get_logger("copilot.rag.crawler")
+
+# Regex to extract URL targets from common client-side click handlers (e.g. Liferay buttonClick)
+ONCLICK_NAV_RE = re.compile(
+    r"""(?:buttonClick\([^,]+,\s*|window\.location(?:\.href)?\s*=\s*|location\.href\s*=\s*|window\.open\()\s*['"]([^'"]+)['"]""",
+    re.IGNORECASE,
+)
+
+# Non-navigational document elements to ignore during link discovery
+IGNORED_LINK_TAGS = {
+    "link",
+    "script",
+    "style",
+    "img",
+    "source",
+    "track",
+    "audio",
+    "video",
+    "iframe",
+    "embed",
+    "object",
+}
 
 
 class _HTMLLinkParser(HTMLParser):
-    """Fast, zero-dependency HTML parser extracting href links."""
+    """Fast, zero-dependency HTML parser extracting href, data-href, and navigation onclick links."""
 
     def __init__(self) -> None:
         super().__init__()
         self.links: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.lower() == "a":
-            for attr_name, attr_val in attrs:
-                if attr_name.lower() == "href" and attr_val:
-                    href = attr_val.strip()
-                    # Skip anchor-only or javascript/mailto/tel links
-                    if href and not href.startswith(("#", "javascript:", "mailto:", "tel:")):
-                        self.links.append(href)
+        tag_lower = tag.lower()
+        if tag_lower in IGNORED_LINK_TAGS:
+            return
+
+        for attr_name, attr_val in attrs:
+            if not attr_val:
+                continue
+            name_lower = attr_name.lower()
+            val_clean = attr_val.strip()
+
+            # 1. Standard href navigation (strictly for <a> and <area> anchor elements)
+            if name_lower == "href" and tag_lower in ("a", "area"):
+                if not val_clean.startswith(("#", "javascript:", "mailto:", "tel:")):
+                    self.links.append(val_clean)
+
+            # 2. Client-side data-href and data-url navigation attributes
+            elif name_lower in ("data-href", "data-url"):
+                if not val_clean.startswith(("#", "javascript:", "mailto:", "tel:")):
+                    self.links.append(val_clean)
+
+            # 3. Client-side button click handlers with target URLs
+            elif name_lower == "onclick":
+                match = ONCLICK_NAV_RE.search(val_clean)
+                if match:
+                    target_url = match.group(1).strip()
+                    if target_url and not target_url.startswith(("#", "javascript:", "mailto:", "tel:")):
+                        self.links.append(target_url)
 
 
 def extract_links(html_text: str, current_url: str) -> list[str]:
@@ -65,7 +112,8 @@ def extract_links(html_text: str, current_url: str) -> list[str]:
     for href in parser.links:
         try:
             absolute = urljoin(current_url, href)
-            resolved.append(absolute)
+            if not is_static_asset(absolute):
+                resolved.append(absolute)
         except Exception:
             continue
     return resolved
@@ -346,8 +394,18 @@ class CrawlOrchestrator:
 
                 # Step 2: Unified conditional request lookup from active snapshot
                 prev_version = previous_by_url.get(normalize_url(current_url))
-                etag = prev_version.etag if prev_version else None
-                last_modified = prev_version.last_modified if prev_version else None
+
+                # If cleaner version changed and raw_html is NOT preserved, force full fetch without 304
+                if (
+                    prev_version
+                    and prev_version.cleaner_version != CLEANER_VERSION
+                    and not prev_version.raw_html
+                ):
+                    etag = None
+                    last_modified = None
+                else:
+                    etag = prev_version.etag if prev_version else None
+                    last_modified = prev_version.last_modified if prev_version else None
 
                 # Step 3: Fetch page via polite HTTP client
                 fetch_start = time.monotonic()
@@ -403,11 +461,16 @@ class CrawlOrchestrator:
                             duration_ms=duration_ms,
                         )
                     else:
-                        summary.unchanged += 1
+                        if prev_version.cleaner_version != CLEANER_VERSION and prev_version.raw_html:
+                            summary.changed += 1
+                            outcome = "changed"
+                        else:
+                            summary.unchanged += 1
+                            outcome = "unchanged"
                         log_page_visit(
                             logger.info,
                             url=current_url,
-                            outcome="unchanged",
+                            outcome=outcome,
                             status_code=304,
                             duration_ms=duration_ms,
                         )
@@ -484,6 +547,7 @@ class CrawlOrchestrator:
                     if (
                         matched_prev
                         and matched_prev.content_hash == cleaned.content_hash
+                        and matched_prev.cleaner_version == cleaned.cleaner_version
                         and not matched_prev.is_removed
                     ):
                         summary.unchanged += 1

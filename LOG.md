@@ -686,3 +686,200 @@ Numbers:
 
 
 
+
+---
+
+## 2026-11-16 · Session 22: Verbatim Slicing, Heading Hierarchy, and Typed Ingestion Contract (Step 2.1)
+
+Did:
+- Verbatim Slicing & Exact Offset Tracking (`src/copilot/rag/chunker.py`, `src/copilot/rag/models.py`):
+  - Completely redesigned text partitioning: chunks are strictly exact verbatim substrings of the source text (`doc_text[char_start:char_end]`), eliminating synthetic join delimiters (`" "` or `\n\n`) and separator loss.
+  - Recorded `char_start`, `char_end`, and `overlap_chars` per `Chunk` and `ChunkSlice`. The UI displays clean, non-duplicated document text by selecting `chunk.text[chunk.overlap_chars:]`.
+  - Reconstructing text by concatenating `chunk.text[chunk.overlap_chars:]` across all chunks perfectly reproduces the original section text without character or whitespace drift.
+- Preserved Structural Blocks (`src/copilot/rag/chunker.py`):
+  - Re-ordered separator hierarchy to evaluate table rows and list items (`r"(?<=\n)(?=[-*+] |\d+\. |\|)"`) before simple newlines (`\n`). Prevents markdown tables and lists from being flattened into single lines.
+- Embedder Budgeting for Section Paths (`src/copilot/rag/chunker.py`):
+  - When `section_path_in_embedding=True`, path tokens (`token_counter.count_tokens(section.path + "\n\n")`) are subtracted from `max_tokens` before chunk capacity is allocated.
+  - Guarantees `token_counter.count_tokens(section.path + "\n\n" + chunk.text) <= max_tokens`.
+- Overlap Quality & Whitespace Snapping (`src/copilot/rag/chunker.py`):
+  - Snaps `extract_overlap_tail` starting positions to whitespace boundaries, preventing mid-word cuts with subword tokenizers.
+  - Enforced a minimum token threshold (`min_tokens = max(1, overlap_tokens // 2)`) before sentence/clause splitting to prevent overlaps from collapsing to 1-2 words.
+- Typed Ingestion Contract (`src/copilot/rag/models.py`):
+  - Created `ChunkInput` dataclass with factory adapter `ChunkInput.from_page_version(page)`.
+  - Automatically filters ineligible pages: returns `None` for removed pages (`is_removed=True`), JavaScript shells (`needs_js=True`), or non-200 HTTP statuses.
+  - Removed raw HTML fallback from chunker; strictly consumes cleaned text from `ChunkInput.text`.
+- Source Type & Owner Validation (`src/copilot/rag/chunker.py`):
+  - Enforced `owner_id is None` for `"builtin"` sources, and `owner_id is not None` for `"upload"` sources.
+  - Cross-checked `chunker_config.tokenizer_id == token_counter.tokenizer_id`.
+  - Defaulted missing languages to `"und"`.
+- Collision-Free Deterministic Chunk IDs (`src/copilot/rag/chunker.py`):
+  - Updated `chunk_id` to hash `url_or_filename`, `page_version_id`, `section_ordinal`, `section_path`, and `index`. Eliminates ID collisions between different URLs sharing identical text.
+- Heading Hierarchy Preservation in Cleaner (`src/copilot/rag/crawler/cleaner.py`):
+  - Updated `_clean_with_beautifulsoup` to prefix headings with `#` repeated to their level (`#` to `######`), preserving section depth in the heading stack (`H1 > H2 > H3`).
+- Skip Empty Normalized Chunks (`src/copilot/rag/chunker.py`):
+  - Automatically skips chunks where `normalized_text` collapses to empty (e.g. tatweel or diacritics only).
+- Exact Embedding Input Token Verification (`src/copilot/rag/chunker.py`, `src/copilot/rag/__init__.py`):
+  - Addressed model truncation risk: embedders receive more than `chunk.text` (specifically `passage_prefix` + `section_path` + `chunk.text`), and tokenizer non-additivity means `count(a + b) != count(a) + count(b)`.
+  - Implemented `format_embedding_input(chunk_text, section_path, passage_prefix, include_section_path)`.
+  - Updated `chunk_section_slices` to budget both `passage_prefix` and `section_path` against `min(chunker.max_tokens, embedder.max_length)`, and recounts candidate chunk slices directly on `embedding_input`.
+  - Enforced strict runtime assertion in `chunk_page`: `actual_tokens = token_counter.count_tokens(embedding_input)`; raises `ValueError("Embedding input ({actual_tokens} tokens) exceeds model token limit ({max_limit})")` if violated.
+  - Exported `format_embedding_input` in `copilot.rag`.
+- Test Suite Expansion (`tests/unit/test_chunker.py`):
+  - Added 11 new unit tests covering verbatim slices, character offset matching, table/list newline retention, path budgeting, page filtering conditions, owner validation, empty normalized skipping, URL collision prevention, BeautifulSoup heading hierarchy, `format_embedding_input`, and actual embedding token verification with prefix/path.
+
+Broke:
+- Nothing.
+
+Fixed:
+- Altered chunk text from split/rejoin: replaced with verbatim contiguous slices `text[char_start:char_end]`.
+- Flattened tables/lists: prioritized table/list lookahead separator before newline.
+- Dead code in list separator: lookahead now matches before newlines are divided.
+- Ineffective `target_tokens`: packed segments strictly up to `target_tokens`.
+- Embedder overflow from section path and passage prefix: budgeted `passage_prefix` + `section_path` and verified `token_counter.count_tokens(format_embedding_input(...)) <= max_length`.
+- Mid-word and tiny overlaps: snapped to word boundaries with minimum boundary threshold.
+- Chunk ID collisions across URLs: incorporated `url_or_filename` in ID derivation.
+- Cleaner heading level loss: emitted `#` markers based on heading tag levels in BeautifulSoup.
+
+Numbers:
+- 58 unit tests passing across all 4 test suites (6 in `test_tokens.py`, 20 in `test_normalize.py`, 23 in `test_chunker.py`, 9 in `test_fingerprint.py`).
+- 58 out of 58 tests passing in 0.162s.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+---
+
+## 2026-11-16 · Session 23: Crawler Cleaner Hardening, Rule Versioning, Quality Gate, and DOM Traversal
+
+Did:
+- Cleaner Rule Versioning Architecture (`src/copilot/rag/crawler/cleaner.py`):
+  - Decoupled library versions from rule versions: defined `TRAFILATURA_RULE_VERSION = "traf-rules-v1.0"` and `BS4_RULE_VERSION = "bs4-rules-v1.0"`.
+  - Updated `_resolve_cleaner_version()` to produce format `trafilatura-{ver}+traf-rules-v1.0+bs4-rules-v1.0` (or `bs4-only+bs4-rules-v1.0`), ensuring extraction rule changes trigger version bumps independently of library updates.
+- Real Extracted Content Quality Gate (`src/copilot/rag/crawler/cleaner.py`):
+  - Implemented `passes_quality_gate(text: str) -> bool`:
+    - Enforces minimum length (>= 40 characters) and minimum word count (>= 8 content words).
+    - Checks boilerplate pollution ratio (rejects text where > 35% of lines are boilerplate).
+    - Detects and rejects text consisting solely of comparison modals, shopping cart empty prompts, and nav residue.
+    - Requires at least one substantive sentence or informative heading (>= 4 words).
+  - Applied quality gate to Trafilatura output: low-quality Trafilatura extractions are automatically rejected and fall back to BeautifulSoup.
+- Extractor Provenance Tracking (`src/copilot/rag/crawler/cleaner.py`, `models.py`, `snapshot.py`):
+  - Added `extractor: str` field across `CleanedPage`, `PageVersion`, and `SnapshotManifestEntry` recording `"trafilatura"`, `"beautifulsoup"`, or `"none"` (for JS shells).
+- Site-Specific and Modal Boilerplate Pruning (`src/copilot/rag/crawler/cleaner.py`):
+  - Added exact selectors and token matching for `#resetComparableWarning`, `#compareModal`, `.modal`, `.modal-fade`, `.compare-basket`, `.compare-widget`, cookie banners, and floating widgets, decomposing them directly from the DOM before text extraction.
+- Reduced Over-Aggressive Tag Deletion (`src/copilot/rag/crawler/cleaner.py`):
+  - Removed `<header>` and `<form>` from blanket `BOILERPLATE_TAGS` deletion.
+  - Implemented `is_site_level_header`: only removes global site banner headers (`role="banner"`, `.site-header`, navbar headers outside `article`/`main`), preserving `<article><header>` and section headers.
+  - Implemented `is_boilerplate_form`: only removes search, login, or newsletter forms, preserving informative forms (usage calculators, package finders) while stripping submit buttons and hidden inputs.
+- Exact Token-Based Class/ID Matching (`src/copilot/rag/crawler/cleaner.py`):
+  - Replaced broad regex attribute searching with exact class and ID token sets (`EXACT_BOILERPLATE_CLASSES`, `EXACT_BOILERPLATE_IDS`, `EXACT_BOILERPLATE_ROLES`).
+  - Completely eliminated false-positive deletion of legitimate content classes (e.g. `.content-widget`, `.hero-banner-title`).
+- Hierarchical List Extraction without Duplication (`src/copilot/rag/crawler/cleaner.py`):
+  - Implemented `_extract_list` traversing direct children with `recursive=False`, extracting direct text and indenting nested sub-lists (`  * depth + "- "`).
+  - Child list items now appear exactly once without duplicate aggregation in parent items.
+- Tabular Relationship Preservation (`src/copilot/rag/crawler/cleaner.py`):
+  - Implemented `_extract_table` extracting table rows with clear `| cell1 | cell2 |` boundaries and markdown header separators (`| --- | --- |`), preserving column and row associations.
+- Snapshot Store Cleaner Version Awareness & 304 Re-cleaning (`src/copilot/rag/crawler/snapshot.py`, `orchestrator.py`):
+  - In HTTP 200 processing: `PageVersion` reuse strictly requires `prev_version.cleaner_version == cleaned.cleaner_version` in addition to matching `content_hash`. If cleaner version changed, creates a new `PageVersion` ensuring updated rule provenance is recorded.
+  - In HTTP 304 processing:
+    * If `prev_version.cleaner_version == CLEANER_VERSION`: safely reuses `prev_version` updating `last_verified_at=now_iso`.
+    * If `prev_version.cleaner_version != CLEANER_VERSION` and `raw_html` is preserved: automatically re-cleans `raw_html` with current cleaner rules, updating `cleaned_text`, `content_hash`, `cleaner_version`, and `extractor`.
+    * If `prev_version.cleaner_version != CLEANER_VERSION` and `raw_html` is missing: orchestrator forces full fetch (`etag=None`, `last_modified=None`), avoiding reliance on 304 when re-cleaning is impossible.
+- Snapshot Maintenance & Crawl Readiness:
+  - Removed `scripts/reclean_snapshot.py` and restored manifest per user request to execute a fresh polite crawl.
+- Test Suite:
+  - Created `tests/unit/test_cleaner_features.py` with 12 unit tests verifying rule versioning, extractor recording, quality gate evaluation, modal pruning, article header retention, form preservation, non-removal of content widgets, non-duplication of nested lists, table formatting, HTTP 200 cleaner version reuse condition, HTTP 304 re-cleaning of preserved raw_html, and HTTP 304 reuse on matching cleaner version.
+  - Updated `tests/unit/test_cleaner_and_snapshot.py` to match the new version format.
+
+Broke:
+- Nothing.
+
+Fixed:
+- Trafilatura accepting noise and comparison modal scraps: guarded with strict `passes_quality_gate`.
+- Unknown extractor provenance: explicitly tracked in `CleanedPage` and `PageVersion`.
+- Stale cleaner version on reused pages: enforced `prev_version.cleaner_version == cleaned.cleaner_version` on HTTP 200.
+- Stale text on HTTP 304 when cleaner rules change: re-cleans saved `raw_html` or forces full fetch.
+- Accidental deletion of article headers and helpful form instructions.
+- Broad regex falsely deleting content widgets and banners.
+- Duplication of child items in nested HTML lists.
+- Tables losing column/row relationships.
+
+Numbers:
+- 67 unit tests passing across all test suites (9 in `test_cleaner_features.py`, 6 in `test_tokens.py`, 20 in `test_normalize.py`, 23 in `test_chunker.py`, 9 in `test_fingerprint.py`).
+- 67 out of 67 tests passing in 0.182s.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+## 2026-11-16 · Session 11: Fix `needs_js=False` False Negatives on Portal Nav / SPA Shells
+
+Did:
+- Portal Navigation and Header Shell Boilerplate Pruning (`src/copilot/rag/crawler/cleaner.py`):
+  - Added exact ID and class token checks for Liferay portal layout structures: `lfr-layout-structure-item-main-header`, `lfr-layout-structure-item-secondary-header-fragment`, `lfr-layout-structure-item-back-to-top`, `lfr-layout-structure-item-comparison-page-cards`, `quick-access-nav`, `sbst_quickAccessNav`, `skip-link`.
+  - Expanded `KNOWN_BOILERPLATE_LINES` to strip quick-access links (`روابط سريعة`), skip links (`تخطي إلى المحتوى الرئيسي`), top header navigation (`الصفحة الرئيسية`), navigation action noise (`رجوع` / `back`, `حذف الكل` / `clear all`, `أضف منتج آخر` / `add another product`), and empty placeholder lines (`No current services`, `No current promotions`, `لا توجد خدمات`, `لا توجد عروض`).
+- Fixed Quality Gate Sentence Detection Bug (`src/copilot/rag/crawler/cleaner.py`):
+  - Fixed a flaw where `total_content_text = " ".join(content_lines)` erased newlines before splitting on sentences, causing isolated 1-2 word navigation labels and card pills to falsely concatenate into a synthetic "substantive sentence".
+  - Evaluates substantive sentences per line/clause (`re.split(r"[\n.!?؛]+", line)`), ensuring that lists of short labels without complete sentences are rejected by `passes_quality_gate`.
+- Hardened `is_javascript_shell` Multi-Signal Evaluation (`src/copilot/rag/crawler/cleaner.py`):
+  - Flagged scripted pages with 0 substantive sentences as `needs_js=True` (empty shells / SPA catalog shells).
+  - Strictly required BeautifulSoup fallback to pass `passes_quality_gate` before accepting text (removed loose `or bs4_text.strip()`).
+  - Added backward-compatible `BOILERPLATE_PATTERNS` export to `copilot.rag.crawler.cleaner` and `copilot.rag.cleaner`.
+  - Bumped rule versions to `traf-rules-v1.1` and `bs4-rules-v1.1`.
+- Added Test Suite Coverage (`tests/unit/test_cleaner_features.py`):
+  - Added `test_navigation_and_skip_links_portal_shell_detected_as_js` verifying that portal shells with only navigation menus, quick links, skip links, and card pills evaluate to `needs_js=True`, `extractor="none"`, and empty cleaned text.
+  - Added `test_no_duplicate_content_from_nested_p_or_overlays` verifying that nested `<p>` inside headings, hover `.overlay` elements, and consecutive identical blocks do not produce duplicate text.
+- Fixed Heading & Paragraph Content Duplication (`src/copilot/rag/crawler/cleaner.py`):
+  - In `_clean_with_beautifulsoup`, when processing `h1-h6` or `p`, all child tags (`elem.find_all(True)`) are registered in `handled_ids`. This prevents nested `<p>` tags inside `<h3>` (a common pattern in telecom cards like `<h3><p>خدمة WE Sports...</p></h3>`) from being extracted once as a heading and a second time as a paragraph.
+  - Added `"overlay"`, `"hover-overlay"`, `"card-overlay"` to `EXACT_BOILERPLATE_CLASSES` to prune CSS hover overlay cards that duplicate card titles (such as `OneHome`, `باقات WE أرضي`, `WE MIX`).
+  - Added consecutive identical block suppression in `_clean_with_beautifulsoup` (`clean_key == prev_key`).
+
+- Preserved Line Structure in Content Hashing (`src/copilot/rag/crawler/cleaner.py`):
+  - Replaced horizontal-collapsing `normalize_whitespace` in `compute_content_hash` with `normalize_content_lines`. It normalizes whitespace within each line while strictly preserving line breaks (`\n`) and markdown structure, ensuring structural edits produce distinct content hashes.
+- Robust Nested List Extraction with Div/Span Wrappers (`src/copilot/rag/crawler/cleaner.py`):
+  - Refactored `_extract_list` using ancestor-chain checks (`parent_list is list_elem` and `parent_li is li`). Properly handles `<li>` and nested `<ul>`/`<ol>` wrapped inside intermediate `<div>` or `<span>` containers, isolating parent item text from nested list text and formatting hierarchy cleanly.
+- P0: Nested Tables Isolation Without Mixing Rows or Cells (`src/copilot/rag/crawler/cleaner.py`):
+  - Refactored `_extract_table` to strictly extract `<tr>` elements whose closest table ancestor is `table_elem` and cells (`<th>`/`<td>`) whose closest row ancestor is `tr`.
+  - Excluded text inside nested `<table>` from outer cell strings and extracted nested tables as their own distinct markdown tables, completely eliminating row/cell scrambling.
+- Eliminated `needs_js` False Positives on Content Pages (`src/copilot/rag/crawler/cleaner.py`):
+  - Tuned `is_javascript_shell` and `passes_quality_gate` to reserve `needs_js=True` strictly for true empty SPA shells (`<div id="root">` with generic loaders or `<noscript>You need to enable JavaScript</noscript>`). Pages returned by HTTP 200 with headings, card titles, or content lines (e.g. `prepaid`, `control`) preserve their text and evaluate to `needs_js=False`.
+
+Broke:
+- Nothing.
+
+Fixed:
+- `content_hash` destroying line breaks and collapsing markdown into a single horizontal string.
+- Scrambling of nested tables and mixing of outer and inner table rows and cells.
+- Flattening of nested lists when `<div>` or `<span>` wrappers are present around items.
+- False positive `needs_js=True` on content-bearing pages (e.g. `prepaid`) wiping out valid text.
+- Content duplication where heading text repeats immediately as a paragraph (e.g. `### خدمة WE Sports ...` followed by `خدمة WE Sports ...` and `### الشهر العقاري` followed by `الشهر العقاري`).
+- Card title duplication caused by hover `.overlay` divs (`OneHome \n\n OneHome`, `باقات WE أرضي \n\n باقات WE أرضي`).
+- `ImportError: cannot import name 'BOILERPLATE_PATTERNS'` in backward compatibility re-export.
+
+Numbers:
+- 77 unit tests passing (19 in `test_cleaner_features.py`, 6 in `test_tokens.py`, 20 in `test_normalize.py`, 23 in `test_chunker.py`, 9 in `test_fingerprint.py`).
+- 77 out of 77 tests passing in 0.637s.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+## 2026-11-16 · Session 12: Fix Static Asset Link Extraction and Clarify Partial Crawl Snapshot Carryover
+
+Did:
+- Excluded Static Assets from Link Discovery (`src/copilot/rag/crawler/orchestrator.py`):
+  - Updated `_HTMLLinkParser` to ignore non-navigational document elements (`IGNORED_LINK_TAGS = {"link", "script", "style", "img", "source", "track", "audio", "video", "iframe", "embed", "object"}`).
+  - Restricted standard `href` extraction strictly to anchor and area elements (`tag_lower in ("a", "area")`), preventing `<link rel="stylesheet">` and `<link rel="icon">` from being parsed as crawler navigation links.
+  - Filtered resolved URLs in `extract_links` through `is_static_asset` before scheduling them into the crawl queue.
+- Static Asset Filtering in Allowlist Validation (`src/copilot/rag/crawler/url_utils.py`):
+  - Added `STATIC_ASSET_EXTENSIONS` containing styles, scripts, source maps, images, icons, fonts, audio, video, archives, and binaries (`.css`, `.js`, `.ico`, `.png`, `.jpg`, `.pdf`, `.zip`, etc.).
+  - Added `is_static_asset(url_or_path: str)` checking trailing path extensions and path segments (such as Liferay `/documents/.../te.fav.ico/<uuid>`).
+  - Integrated static asset rejection into `is_allowed_url(url, config)`.
+- Verified Partial Crawl Snapshot Carryover Mechanics (`src/copilot/rag/crawler/snapshot.py`):
+  - Confirmed that running with `--max-pages 10` stops via page cap (`stopped_by_cap = True`), marking `crawl_complete = False`.
+  - For partial crawls, `SnapshotStore.build_snapshot` intentionally carries over unvisited pages from the active baseline snapshot so an incremental crawl does not truncate or drop the existing knowledge base corpus.
+- Added Test Suite Coverage (`tests/unit/test_cleaner_features.py`):
+  - Added `test_extract_links_ignores_static_assets_and_link_tags` verifying that stylesheets, favicons, scripts, images, and document asset extensions are not extracted or permitted.
+
+Broke:
+- Nothing.
+
+Fixed:
+- Crawling non-HTML asset files (`all_styles.min.css`, `te.fav.ico`, etc.) triggered by `<link>` tags in HTML `<head>`.
+- Allowed list accepting static assets when path contained embedded asset extensions.
+
+Numbers:
+- 79 unit tests passing across all test suites (20 in `test_cleaner_features.py`, 6 in `test_tokens.py`, 20 in `test_normalize.py`, 23 in `test_chunker.py`, 9 in `test_fingerprint.py`).
+- 79 out of 79 tests passing in 0.340s.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
