@@ -1,8 +1,12 @@
 # Support Copilot: Step-by-Step Execution Plan
 
-*Version 0.2 · November 11, 2026 · Companion to the PRD · 8 weeks (Week 2 is split into 2A and 2B)*
+*Version 0.4 · November 12, 2026 · Companion to the PRD · about 10 weeks in practice (Week 2 is split into 2A, 2B and 2C)*
 
 **Change in v0.2:** Week 2 is rewritten for professional, idempotent RAG from crawl to answer. New step 2.3b (incremental ingestion), a pipeline fingerprint, a content hash on cleaned text, a snapshot-to-page-version schema, ingestion metrics and spans, retrieval-stage tracing, deeper evals with a reproducibility record, and step 2.13 (judge calibration). This satisfies FR-RAG-4.
+
+**Change in v0.4:** the RAG part is now complete in Week 2. New Week 2C (steps 2.14 to 2.21) adds index versioning, experiment tracking, the model and prompt lock, cost and token budgets, online evaluation, drift and canary monitoring, the deprecation watch, and runbooks, all scoped to RAG. Later weeks extend the same machinery to ASR, TTS, voice and the agent. Week 2 now takes about three weeks, so the plan runs about 10 weeks unless you cut scope (see "If you are stuck or behind").
+
+**Change in v0.3:** Week 2 now also covers caching and prompt-injection defense. Step 2.2 adds a query-embedding cache, step 2.3b flags suspicious chunks during ingestion, new step 2.5b defends against injection in retrieved text (FR-KB-10), and new step 2.5c adds an exact-match answer cache with strict keys and privacy rules. Evals run with caches bypassed. The semantic cache stays in step 6.3, with the key rules from 2.5c.
 
 ## How to use this plan
 
@@ -27,24 +31,26 @@
 
 ## MLOps and LLMOps at a glance
 
-LLMOps manages the prompts, models, evaluations and cost of the LLM application. MLOps manages any model you train or host yourself: the embedder, the reranker, local ASR and TTS, and a small classifier. Both are built into the weeks below as new steps, about 3 to 4 extra days in total; step 6.8 is optional.
+LLMOps manages the prompts, models, evaluations and cost of the LLM application. MLOps manages any model you train or host yourself: the embedder, the reranker, local ASR and TTS, and a small classifier. The RAG scope of each practice is built in Week 2C (steps 2.14 to 2.21), and later weeks extend it to ASR, TTS, voice and the agent. Step 6.8 is optional.
 
 | Practice | What it means here | Free tools to start with | Step |
 | --- | --- | --- | --- |
 | Prompt versioning | Prompts live in versioned files, and every trace records the prompt id and hash | Git (Langfuse prompt management is optional; check plan limits) | 2.11 |
 | Dataset versioning | Eval sets, ASR audio and the corpus have versions and checksums | Git, plus DVC or Git LFS for large files | 2.12 |
 | Pipeline fingerprint | Every page version and chunk records the cleaner, normalizer, chunker and embedder versions, so a change reprocesses only what it affects | Postgres | 2.1 to 2.3b |
+| Caching | Chunk-embedding cache and query-embedding cache (Week 2), exact answer cache keyed by snapshot, fingerprint, prompt and model (Week 2), semantic cache (Week 6) | Postgres, Redis | 2.2, 2.3b, 2.5c, 6.3 |
+| Untrusted-content defense | Retrieved text is data, never instructions: prompt delimiters, ingestion-time flags, retrieval filter, red-team seeds | pytest, regex patterns | 2.5b, 3.3, 3.8, 3.11 |
 | Judge calibration | The LLM judge is checked against a small human-labeled sample before its numbers are trusted | Git, a small script | 2.13 |
 | Red-team regression | Every attack and incident becomes a permanent test case | pytest | 3.8 |
-| Experiment tracking | Each eval or training run is recorded as a Langfuse experiment run, with code, data, prompt and model versions and its scores | Langfuse datasets and experiment runs | 5.7 |
-| Model registry | Each role has a pinned model id approved by a named eval run; local models are versioned with a model card | A lock file in Git, plus Hugging Face Hub or Git LFS for local model files | 5.8 |
-| Index versioning | A new embedding model or chunk size builds a new index that is switched on after evaluation, with rollback | Postgres | 6.6 |
-| Cost budgets | Daily token and cost budgets per role, with a degraded mode and alerts | Config, Prometheus | 6.7 |
+| Experiment tracking | Each eval or training run is recorded as a Langfuse experiment run, with code, data, prompt and model versions and its scores | Langfuse datasets and experiment runs | 2.15, 5.7 |
+| Model registry | Each role has a pinned model id approved by a named eval run; local models are versioned with a model card | A lock file in Git, plus Hugging Face Hub or Git LFS for local model files | 2.16, 5.8 |
+| Index versioning | A new embedding model or chunk size builds a new index that is switched on after evaluation, with rollback | Postgres | 2.14, 6.6 |
+| Cost budgets | Daily token and cost budgets per role, with a degraded mode and alerts | Config, Prometheus | 2.17, 6.7 |
 | Training pipeline | A reproducible train, evaluate, register and deploy loop for a small router classifier | scikit-learn, Langfuse, DVC | 6.8 (optional) |
-| Online evaluation | Sampled production traces are scored, and bad ones feed the golden set | Langfuse scores, a scheduled job | 7.8 |
-| Drift and canary checks | A daily eval and distribution checks catch silent provider or data changes | Nightly workflow, Prometheus | 7.9 |
-| Deprecation watch | A weekly job warns before a pinned model is retired | Scheduled script | 7.10 |
-| Governance | Runbooks for quality drops, retired models and cost spikes, plus an append-only approval audit log | Markdown, Postgres | 8.7 |
+| Online evaluation | Sampled production traces are scored, and bad ones feed the golden set | Langfuse scores, a scheduled job | 2.18, 7.8 |
+| Drift and canary checks | A daily eval and distribution checks catch silent provider or data changes | Nightly workflow, Prometheus | 2.19, 7.9 |
+| Deprecation watch | A weekly job warns before a pinned model is retired | Scheduled script | 2.20, 7.10 |
+| Governance | Runbooks for quality drops, retired models and cost spikes, plus an append-only approval audit log | Markdown, Postgres | 2.21, 8.7 |
 
 ## Knowledge sources at a glance
 
@@ -138,13 +144,14 @@ Set a budget alert in Billing right away. Done when a public URL returns ok on /
 
 **Record in LOG.md:** the public URL, a screenshot of green CI, and every problem you hit during the first deploy.
 
-## Week 2: RAG (professional, idempotent, observable)
+## Week 2: RAG (professional, idempotent, observable, with LLMOps)
 
-Goal: grounded answers with citations over the built-in WE snapshot, where re-running ingestion does nothing when nothing changed, every stage is observable, and every number you measure can be reproduced. This week has about 25 steps, so treat it as two weeks.
+Goal: grounded answers with citations over the built-in WE snapshot, where re-running ingestion does nothing when nothing changed, every stage is observable, every number you measure can be reproduced, and the whole RAG part can be versioned, rolled back, monitored and operated. This week has about 36 steps, so treat it as three weeks (2A, 2B and 2C).
 
-- **Week 2A (ingest and answer):** 2.0a, 2.0b, 2.0c, 2.1, 2.2, 2.3, 2.3b, 2.4, 2.5, 2.5a. Exit: a cited answer from the real snapshot and a passing "run it twice" test.
-- **Week 2B (measure and operate):** 2.6 to 2.13. Exit: baseline numbers with a before/after, a dashboard, a trace and a CI gate.
-- If time is short, move 2.11 and 2.12 to the start of Week 3. Never cut 2.3b, 2.7, 2.8 or 2.9.
+- **Week 2A (ingest and answer):** 2.0a, 2.0b, 2.0c, 2.1, 2.2, 2.3, 2.3b, 2.4, 2.5, 2.5a, 2.5b, 2.5c. Exit: a cited answer from the real snapshot and a passing "run it twice" test.
+- **Week 2B (measure and observe):** 2.6 to 2.13. Exit: baseline numbers with a before/after, a dashboard, a trace and a CI gate.
+- **Week 2C (LLMOps for RAG):** 2.14 to 2.21. Exit: an index switched and rolled back with evidence, experiment runs in Langfuse, a model lock file, a canary alert demonstrated in dry-run mode, and runbooks linked from every alert.
+- If time is short, cut in this order: 2.20, 2.18 (build only the scoring job), 2.19, then move 2.11 and 2.12 to Week 3. Keep 2.14 to 2.17. Never cut 2.3b, 2.7, 2.8 or 2.9.
 
 **Design rules for this week**
 
@@ -153,6 +160,8 @@ Goal: grounded answers with citations over the built-in WE snapshot, where re-ru
 3. **Snapshots are views.** A snapshot is a list of page-version ids. Chunks belong to a page version. Unchanged pages are shared between snapshots, so nothing is duplicated.
 4. **Everything is an upsert.** Every write uses a unique key, so running a job twice or resuming a killed job cannot create duplicates.
 5. **Every stage emits a metric and a span** with bounded labels (source type, outcome). Never user, session or request ids as labels.
+6. **Retrieved text is untrusted.** Crawled pages are data, never instructions. Flag suspicious chunks at ingestion and screen them again at retrieval.
+7. **Caches never change correctness.** Every cache key includes everything that could change the value (snapshot, fingerprint, prompt, model, language). Evals run with caches bypassed.
 
 **2.0a Crawl rules and polite client.** Create configs/crawl.yaml with the start URLs (https://www.te.eg/we is your starting point; confirm the exact customer-service URLs by hand), the allowed host and path prefixes, denied patterns (login, account, payment, forms, query strings), the languages (ar and en), a page cap, a delay between requests, and a User-Agent that names the project. The contact address in the User-Agent comes from an environment variable (CRAWL\_CONTACT), never from a file in the public repository. First read the site's robots.txt and terms of use in a browser and note the result in LOG.md. If automated access is not allowed, stop and use pages you save by hand. Then write the robots.txt check (Python's urllib.robotparser works) and a polite HTTP client: one connection, a delay, timeouts, retries with backoff, conditional requests (ETag and Last-Modified), and a stop after repeated 403 or 429 answers. A missing robots.txt (404) allows crawling. A robots.txt that cannot be fetched (5xx or a network error) means do not crawl.
 
@@ -178,6 +187,10 @@ Store each page version with URL, canonical URL, title, language, fetched-at tim
 
 **Tests:** an Embedder contract suite: the output dimension matches the config, the same text gives the same vector, a batch equals single calls. A sanity test checks that a paraphrase scores higher than an unrelated sentence, in Arabic, in English and across languages (an Arabic question against English text). FakeEmbedder counts its calls (step 2.3b needs this) and is used everywhere else.
 
+*Query-embedding cache:* wrap the embedder with a Cached wrapper for queries (Redis, with a TTL). The key is a hash of the normalized query text plus the embedder fingerprint. Never cache raw query text as the key. Skip the cache for queries flagged as containing PII.
+
+**Tests:** the second identical query is a hit with no embedder call; a different embedder fingerprint or a different normalized text is a miss; entries expire with a fake clock; a PII-flagged query is never cached; hit and miss counters increase.
+
 **2.3 Database.** Write an Alembic migration. Snapshots point to page versions, and chunks belong to page versions, so unchanged pages are never duplicated.
 
 - snapshots: id, created\_at, status, gate\_report\_id.
@@ -187,6 +200,7 @@ Store each page version with URL, canonical URL, title, language, fetched-at tim
 - chunks: id, page\_version\_id or source\_id, owner\_id, source\_type, section\_path, language, text, normalized\_text, chunk\_hash, pipeline\_fingerprint, a pgvector column, a full-text search column and tombstoned\_at.
 - embedding\_cache: chunk\_hash, embedder fingerprint, vector, so identical chunks are never embedded twice.
 - jobs: id, type, source\_id, status, reason, started\_at, finished\_at, counters as JSON.
+- index\_versions: id, fingerprint parts as JSON, status, source snapshot, eval\_run\_id, created\_at, activated\_at (step 2.14 uses it; vectors are stored per index version because pgvector needs a fixed dimension per column).
 
 Unique keys: (canonical\_url, content\_hash) on page versions, (page\_version\_id, chunk\_index, pipeline\_fingerprint) on chunks, and (chunk\_hash, embedder fingerprint) on the cache. Add a Postgres advisory-lock helper for single-job execution. Check which text-search configuration your Postgres offers for Arabic. If none fits, use the 'simple' configuration on normalized text, and measure the choice in step 2.7.
 
@@ -199,10 +213,11 @@ Unique keys: (canonical\_url, content\_hash) on page versions, (page\_version\_i
 3. For each chunk, look up embedding\_cache by (chunk hash, embedder fingerprint). Embed only the misses.
 4. Upsert the chunks and cache rows in one transaction per page version.
 5. Tombstone the chunks of pages removed in the target snapshot, and chunks left over from older versions of a changed page that no active snapshot references.
+6. Scan each new chunk with the injection patterns from step 2.5b and set its suspicious flag. Flag, never delete.
 
-Run it as a background job (not in the web process), one at a time under the advisory lock, with a stored status and counters: pages skipped, pages processed, chunks created, chunks reused, chunks embedded and chunks tombstoned. Later, uploads and user websites use the same ingestion path.
+Run it as a background job (not in the web process), one at a time under the advisory lock, with a stored status and counters: pages skipped, pages processed, chunks created, chunks reused, chunks embedded, chunks tombstoned and chunks flagged suspicious. Later, uploads and user websites use the same ingestion path.
 
-**Tests:** *run it twice:* the second run writes zero rows, makes zero embedder calls (assert on FakeEmbedder) and produces identical chunk ids. Change one page: only that page is reprocessed, and if one sentence changed, only the affected chunks are embedded. Change only boilerplate (header, footer, timestamp): nothing is reprocessed. Change the chunker settings, normalizer version or embedder id: everything is reprocessed, and old-fingerprint chunks are never returned by retrieval. Kill the job mid-run (raise an exception after N pages) and rerun: no duplicates, and the final state equals a clean uninterrupted run. Two jobs started at once: the second waits or exits cleanly because of the lock. A removed page's chunks never appear in retrieval (not just a flag on the page). A failed embed call for one page rolls back that page only, marks it failed with a reason, and the job continues. The counters in the job record match the rows actually written.
+**Tests:** *run it twice:* the second run writes zero rows, makes zero embedder calls (assert on FakeEmbedder) and produces identical chunk ids. Change one page: only that page is reprocessed, and if one sentence changed, only the affected chunks are embedded. Change only boilerplate (header, footer, timestamp): nothing is reprocessed. Change the chunker settings, normalizer version or embedder id: everything is reprocessed, and old-fingerprint chunks are never returned by retrieval. Kill the job mid-run (raise an exception after N pages) and rerun: no duplicates, and the final state equals a clean uninterrupted run. Two jobs started at once: the second waits or exits cleanly because of the lock. A removed page's chunks never appear in retrieval (not just a flag on the page). A failed embed call for one page rolls back that page only, marks it failed with a reason, and the job continues. The counters in the job record match the rows actually written. A chunk containing a known injection phrase gets the suspicious flag and a normal chunk does not (the full pattern tests are in step 2.5b).
 
 **2.4 Retrieval.** Combine vector search and keyword search (reciprocal rank fusion), then rerank with a small cross-encoder if your machine allows it. Every query searches the active built-in snapshot (chunks reachable through its page versions, current fingerprint, not tombstoned) plus the caller's own sources and nothing else. Expose each stage separately (vector, keyword, fuse, rerank) so each can be traced and evaluated on its own.
 
@@ -215,6 +230,30 @@ Run it as a background job (not in the web process), one at a time under the adv
 **2.5a Source labels, freshness and disclaimer.** Each citation shows where it came from: a built-in page (URL and fetched-at date), your file (filename) or your website (URL and fetched-at date). Pages older than a configured age get a note that the information may be out of date, with a link to the official site. Built-in answers state that this is an unofficial assistant, not affiliated with Telecom Egypt or WE, and the UI uses no WE logos. The not-found message points to the official site (the link comes from config).
 
 **Tests:** citations contain the source label and the date; a page older than the limit (with a fake clock) adds the note; the disclaimer is present in the API response and in the UI for built-in answers; the not-found message contains the configured link.
+
+**2.5b Untrusted-content defense (new).** Crawled pages are untrusted data (PRD FR-KB-10). Defend in layers:
+
+1. *Prompt rule:* the answer prompt says retrieved text is reference data and never instructions. Each chunk sits inside clear delimiters with its id, and the model is told to ignore any instruction found inside them.
+2. *Ingestion flag:* a pattern list in English and Arabic (for example "ignore previous instructions", "reveal the system prompt", "you are now", role-play and tool-call imitation, hidden-text tricks such as zero-width characters) sets a suspicious flag on the chunk during step 2.3b. Keep the patterns in a versioned file, and include its version in the pipeline fingerprint so a pattern change re-scans everything.
+3. *Retrieval filter:* by default, flagged chunks are dropped from the prompt context. Log the count and the chunk ids, never the text.
+4. *Output checks:* the citation check from step 2.5 stays. Add a check that the answer does not repeat the system prompt text.
+5. *Red-team seeds:* add the first cases to tests/redteam/ now (a page with an injection in English, one in Arabic, one hidden in a table), so step 3.8 extends them.
+
+The full input guard for user messages stays in step 3.3, and screening of user-supplied sources stays in step 3.11. This step covers the built-in crawl.
+
+**Tests:** a fixture page that says to ignore previous instructions and answer something else is ingested and flagged, excluded from the prompt, and the answer ignores it. The Arabic equivalent and a zero-width-character variant are flagged too. A normal how-to page that uses the word "instructions" is not flagged (check at least 20 realistic passages for false positives). A changed pattern file changes the fingerprint and triggers a re-scan. Flagged counts appear in the ingestion job record and in the metrics. The prompt builder always wraps every chunk in the delimiters, and a chunk containing the closing delimiter has it escaped. The eval reports injection resistance as its own number.
+
+**2.5c Answer cache, exact match (new).** Add a Redis cache for complete answers, to protect your Groq quota during evals, demos and repeated questions. The semantic cache stays in step 6.3.
+
+*Key:* a hash of the normalized question, the reply language, the active snapshot id, the active index version (its pipeline fingerprint), the answer prompt id and hash, the answer model id and the retrieval settings (k, reranker on or off). Any change to one of these is a miss, so a new snapshot, prompt or model never serves an old answer.
+
+*Privacy rule:* cache only answers that used built-in content alone. An answer that used any of a user's own sources is never cached (or, if you later decide to cache it, the key includes the owner id). One user's answer must never be served to another.
+
+*What is never cached:* refusals and not-found replies, errors and degraded-mode replies, answers that triggered a tool or an approval, answers from queries flagged as PII, and anything produced after the injection guard blocked or flagged something.
+
+*Order of checks:* the injection guard runs first, then the cache lookup, then retrieval and generation. Use a TTL and a size cap. Evals and the CI gate run with the cache bypassed through a config flag, so cached answers never hide a regression. The cache returns the stored citations and the original fetched-at dates.
+
+**Tests:** the second identical question is a hit with no retrieval call and no LLM call (assert on fakes); a different language, snapshot id, prompt hash, model id or k is a miss; an answer that used a user's file is not cached; a not-found reply, an error, and a tool-using answer are not cached; a question blocked by the injection guard never reaches the cache; entries expire with a fake clock; with the bypass flag on, the eval runner never reads or writes the cache; hit and miss counters increase and the cached response still carries citations and the unofficial notice.
 
 **2.6 Golden set.** Write the questions yourself from the crawled pages, starting with 30 and growing to 100: about half in Arabic and half in English, including cross-language pairs. For each, store the expected source URL, the snapshot id and your own short notes on the expected answer (do not copy page text into the repository). Tag each question with a type (factual, procedural, cross-language, volatile, adversarial) so results can be broken down. Mark questions about prices and offers as volatile, because they change when the site changes. Add 20 adversarial cases (injection, out of scope, ambiguous, unanswerable). Store them in data/eval/llm/v1/ with a dataset card.
 
@@ -229,18 +268,20 @@ Run it as a background job (not in the web process), one at a time under the adv
 
 *Reproducibility record:* write every eval report as JSON and Markdown, including the snapshot id, dataset version and checksum, pipeline fingerprint and its parts, k values, prompt ids and hashes, model ids per role, judge model id, git SHA and run time. Plain JSON now; Langfuse experiments (5.7) and the lock file (5.8) build on it later.
 
+Run every eval with the caches bypassed (query-embedding and answer caches), and record the bypass setting in the report. Also report injection resistance: the share of injection cases, including the flagged-chunk fixtures from step 2.5b, where the answer ignored the injected instruction.
+
 Done when baseline numbers are in LOG.md. Then change one thing (chunk size or hybrid search), re-measure, and keep the before and after.
 
-**Tests:** check recall@k and MRR against hand-computed values on three toy examples. The judge output must parse as JSON, and a malformed judge reply (from FakeLLM) is handled without crashing. Two runs with the same settings give scores within a tolerance. The report schema requires every reproducibility field, and the eval refuses to run if the dataset checksum does not match its card. Changing the pipeline fingerprint changes the fingerprint field in the report.
+**Tests:** check recall@k and MRR against hand-computed values on three toy examples. The judge output must parse as JSON, and a malformed judge reply (from FakeLLM) is handled without crashing. Two runs with the same settings give scores within a tolerance. The report schema requires every reproducibility field (including the cache bypass setting and the injection pattern file version), and the eval refuses to run if the dataset checksum does not match its card. Changing the pipeline fingerprint changes the fingerprint field in the report.
 
 **2.8 Metrics and first dashboard.** Expose Prometheus metrics, start the observability compose profile, build an Overview dashboard plus an Ingestion and RAG panel group, and export the JSON into ops/grafana. Labels are limited to source type and outcome.
 
-- Ingestion and crawl: pages by outcome (fetched, unchanged, changed, removed, failed, blocked, needs\_js), chunks created, reused, embedded and tombstoned, embedder calls and latency, embedding-cache hit ratio, ingestion job duration and outcome, snapshot age, total stored bytes.
-- RAG: retrieval latency by stage, top retrieval score distribution, no-answer rate, chunks sent to the LLM, tokens and estimated cost per request.
+- Ingestion and crawl: pages by outcome (fetched, unchanged, changed, removed, failed, blocked, needs\_js), chunks created, reused, embedded and tombstoned, embedder calls and latency, chunk-embedding and query-embedding cache hit ratios, chunks flagged suspicious, ingestion job duration and outcome, snapshot age, total stored bytes.
+- RAG: retrieval latency by stage, top retrieval score distribution, no-answer rate, chunks sent to the LLM, flagged chunks dropped from context, answer-cache hits and misses (by kind), tokens and estimated cost per request.
 
 **Tests:** after one request, /metrics contains the expected metric names. A test fails if any label is user\_id, session\_id or request\_id. After running step 2.3b twice, the counters show chunks embedded on the first run and zero on the second. The dashboard JSON parses and contains the required panels.
 
-**2.9 Tracing v1.** Add OpenTelemetry with Langfuse export. One /ask trace shows these spans in order: retrieval with child spans vector\_search, keyword\_search, fusion and rerank, then prompt\_build, llm\_answer and citation\_check. Record these attributes: for retrieval, k, the chunk ids with scores per stage, the snapshot id and the pipeline fingerprint; for the LLM, provider, model, prompt id and hash, token counts and estimated cost. Add a span per ingestion job and per page processed, with counters (skipped, embedded, reused) as attributes. Never record message text or page text on spans at INFO; use ids, lengths and hashes. Done when one full request trace is visible in Langfuse.
+**2.9 Tracing v1.** Add OpenTelemetry with Langfuse export. One /ask trace shows these spans in order: retrieval with child spans vector\_search, keyword\_search, fusion and rerank, then prompt\_build, llm\_answer and citation\_check. Record these attributes: for retrieval, k, the chunk ids with scores per stage, the snapshot id and the pipeline fingerprint; for the LLM, provider, model, prompt id and hash, token counts and estimated cost; and a cache\_hit attribute (query-embedding and answer cache) and the number of flagged chunks dropped. Add a span per ingestion job and per page processed, with counters (skipped, embedded, reused) as attributes. Never record message text or page text on spans at INFO; use ids, lengths and hashes. Done when one full request trace is visible in Langfuse.
 
 **Tests:** with an in-memory span exporter, one /ask produces the expected span names, parent-child structure and attributes (provider, model, tokens). Retrieval spans carry chunk ids and scores but no text. Redaction is applied to span attributes, and errors are always kept by sampling. An ingestion job produces job and per-page spans with correct counters.
 
@@ -260,9 +301,60 @@ Done when baseline numbers are in LOG.md. Then change one thing (chunk size or h
 
 **Tests:** the agreement function is correct on hand-built examples; the labeled sample is stored as a versioned dataset with a card; the calibration script reports agreement and fails below the minimum you set.
 
-**Done when:** ingesting the same snapshot twice writes nothing and makes zero embedder calls (proven by an automated test); changing one page re-embeds only its changed chunks, and changing the chunker or embedder reprocesses everything; killing and resuming ingestion leaves no duplicates; baseline recall@5, MRR, faithfulness, citation accuracy and correct-refusal rate are in LOG.md with the ablation table split by language; judge agreement with your human labels is recorded; a dashboard shows ingestion and RAG metrics; one /ask trace in Langfuse shows every retrieval stage with chunk ids and scores; and CI runs the fixture eval gate and the idempotency test.
+## Week 2C: LLMOps for the RAG part (steps 2.14 to 2.21)
 
-**Record in LOG.md:** the baseline and after numbers, the ablation table, tokens and cost per request, chunks embedded on the first versus second ingestion run, which Arabic keyword method you chose and why, a Langfuse trace screenshot and a dashboard screenshot.
+These steps pull the RAG-related LLMOps practices forward from Weeks 5 to 8, so the RAG part is complete and operable on its own. Each one is scoped to RAG (answer, judge, embedder and reranker roles, the crawl, the index). Later weeks extend the same machinery to ASR, TTS, voice and the agent instead of rebuilding it.
+
+**2.14 Index versioning.** An index version is one complete set of chunks and vectors built with one pipeline fingerprint: cleaner, normalizer, chunker and separators, injection pattern file, embedder id and embedder dimension. Add an index\_versions table (id, fingerprint parts as JSON, status of building, ready, active or retired, source snapshot, eval run id, created\_at, activated\_at). Store vectors per index version, because pgvector needs one fixed dimension per column (a separate embeddings table per version, created by a migration helper, works). Keep two config values apart: active\_snapshot (which pages) and active\_index (which chunking and embedding of those pages).
+
+Flow:
+
+1. Change one setting (chunk size, separators, embedder, reranker settings).
+2. python -m copilot.rag.index build --version v2 runs incremental ingestion (step 2.3b) into a new version beside the active one. The embedding cache is keyed by chunk hash and embedder fingerprint, so changing only the chunker reuses every vector for identical chunks.
+3. python -m copilot.rag.index eval --version v2 runs the golden set against v2 and writes the standard report. It also writes a diff of questions whose top-1 result changed between the active version and v2.
+4. A promotion gate: thresholds are met and there is no regression beyond a tolerance against the active version on recall@5, MRR, faithfulness and correct-refusal rate.
+5. python -m copilot.rag.index activate v2 changes one config value. The answer-cache key includes the active index version, so old cached answers stop matching by themselves.
+6. Keep the previous version for 7 days. python -m copilot.rag.index rollback switches back instantly, and python -m copilot.rag.index gc deletes retired versions only after the retention period, and never the active or the most recent previous one.
+
+Record the index version on every retrieval span and in every eval report. Add metrics: index build duration, chunks and stored bytes per version, active index age. Alert when the database is above 80% of the free limit, because two indexes side by side double the storage.
+
+**Tests:** retrieval reads only the active version. Vectors of different dimensions can never be mixed in one index (a database-level test). Building v2 from the fixture corpus never changes results for the active v1. Promotion refuses when the gate fails and writes the diff report. Rollback restores the v1 results exactly. gc refuses to delete the active or the previous version inside the retention window. A build killed mid-run leaves status building and the active index untouched, and a rerun resumes without duplicates. Changing only the chunker reuses embeddings (count embedder calls on FakeEmbedder). After activation the answer cache misses for old questions. The index version appears in the trace attributes and in the report.
+
+**2.15 Experiment tracking for RAG.** Use Langfuse, so there is no extra service. Upload the golden set as a Langfuse dataset (the name includes the dataset version) and run each eval from step 2.7 as an experiment run over it. Name runs rag-\<date>-\<git sha7>. Every run records as metadata: git SHA, dataset version and checksum, snapshot id, index version, pipeline fingerprint, prompt ids and hashes, model ids per role, judge model id, cache bypass setting and k. Attach as scores: recall@5, MRR, faithfulness, relevance, citation accuracy, correct-refusal rate and injection resistance. Add a script that prints two runs side by side (the before and after table). Put the run name and link in the report.
+
+Watch the monthly unit budget of the Hobby plan. Keep run-level scores for every run, full traces only for failed items or a small sample, and the full trace set for the weekly run. If Langfuse is unreachable, the eval still finishes, writes the local JSON report and warns, and python -m copilot.evals.upload report.json sends it later.
+
+**Tests:** a run with FakeLLM and FakeEmbedder sends the expected metadata and scores to a mocked Langfuse client. The report contains the run name. Two runs with different prompt versions show different prompt ids. If Langfuse is down the eval still produces the report and a warning. The upload command is idempotent (a second upload of the same report creates no duplicate run). A full run stays within the trace budget you set. The side-by-side script gives the expected differences on two hand-made reports.
+
+**2.16 Model and prompt lock for the RAG roles.** Create configs/models.lock.yaml. For each RAG role (answer, judge, embedder, reranker, and router if you use one) record the exact model id, the date it was verified, the id of the approving experiment run from step 2.15, and at least one fallback model. Pin the prompt ids and hashes used by each role. A model becomes primary only through a pull request that includes its approving run. The judge must not use the same model id as the answer role.
+
+Local models (the embedder and reranker): store versioned artifacts with a sha256 checksum (Git LFS or Hugging Face Hub; this is PRD question Q7) and write a model card in docs/model-cards/ with purpose, version, license, languages, size, latency, eval results (a link to the run) and known limits (for example weak Egyptian-dialect coverage). Verify the checksum when the model loads.
+
+**Tests:** the lock file validates against a schema. CI fails if a primary model in the config is missing from the lock file, has no approving run id, or has no fallback. A local model whose checksum does not match is rejected at load. A script fails if a locked local model has no model card. A config change of a model id without a lock update fails CI. The judge and answer roles using the same model id fails validation. A prompt hash that differs from the lock fails the loader check.
+
+**2.17 Cost and token budgets for RAG.** Add configs/pricing.yaml with the price per million tokens for each model (record the paid-tier equivalent even when the free tier costs $0, so you can report what the system would cost). Record usage and estimated cost on every provider call (PRD FR-PRV-6) in the span and in metrics, including embedding calls during ingestion. Set daily token and request budgets per role. At 80% raise an alert. At 100% switch to a degraded mode: fewer chunks in the prompt (for example 4 to 2), shorter answers, the cheaper role, answer-cache-only for repeated questions, and a friendly message. A new UTC day resets the counters. Report cost per 1,000 requests in every eval report and compare it with the last release, flagging an increase above 20%.
+
+**Tests:** with a fake clock and fake usage, crossing 80% raises the alert and crossing 100% triggers the degraded mode, and a new day resets it. The degraded prompt holds fewer chunks and a shorter answer limit. The alert rule passes a promtool test. The cost comparison script flags a 20% increase on synthetic data and ignores a 2% change. Cost is recorded for embedding calls as well as answer calls. No label on the cost metrics contains a user or request id.
+
+**2.18 Online evaluation and feedback loop for RAG.** Add POST /feedback (thumbs up or down with the trace id and an optional reason), stored and linked to the trace (PRD FR-HIL-2). Add a sampler that picks a configurable share of production answers (start at 5%, seeded), only answers that used built-in content (PRD FR-KB-12; answers from private sources are never sampled without consent). A scoring job asks the judge role for faithfulness and relevance and attaches the scores to the trace in Langfuse. The job is idempotent, retries a failed judge call, then skips. Thumbs-down answers, not-found answers, low top-retrieval scores and answers that dropped flagged chunks become candidate cases for the golden set, with PII redacted. Once a week, review about 10 candidates and add the good ones as a new dataset version through the validator from step 2.6. Until the demo has real traffic, run the whole loop on replayed eval traces in dry-run mode.
+
+**Tests:** the sampler picks about the configured share with a seeded random generator and never picks an answer that used a private source. Scoring the same trace twice does nothing the second time. A failed judge call is retried and then skipped without crashing the job. Exported candidate cases pass the dataset validator and contain no PII. A thumbs-down stores one feedback row linked to the right trace id, and a repeated vote from the same visitor updates instead of duplicating.
+
+**2.19 Drift and canary monitoring for RAG.** Add a daily canary job that runs a fixed set of 20 to 30 questions (a subset of the golden set) against the production configuration: active snapshot, active index and pinned models. It compares recall@5 and faithfulness with the release baseline from the approving run and alerts when either drops by more than your threshold (start at 0.05 absolute). Track these distributions against a rolling 7-day baseline: top retrieval score, no-answer rate, flagged-chunk rate, chunks per answer, answer length, language mix, answer-cache hit ratio and snapshot age. Use a simple drift test (a z-score or a population stability index) with a minimum sample size, so a quiet day does not raise a false alarm. Write the alert rules as code under ops/ with promtool tests. Deploying them to Grafana Cloud happens in step 7.4.
+
+**Tests:** drift detector unit tests with synthetic data (no change gives no alert, a shifted mean gives an alert, too few samples gives no alert). The canary job in dry-run mode with fakes produces a report and the right exit code, and a simulated 10-point quality drop turns it red. The alert rules pass promtool tests. The canary uses the production configuration values and not test overrides (a test reads the config the job used).
+
+**2.20 Deprecation watch for RAG.** Add a weekly scheduled job (a GitHub Actions workflow) that lists the models each provider offers (the Groq and Gemini list endpoints) and checks the locked local artifacts (the embedder and reranker files or Hub entries). It compares them with models.lock.yaml. If a pinned model is missing or marked for retirement, the job opens a GitHub issue that names the role and its fallback.
+
+**Tests:** with a fake provider listing, a missing pinned model produces an issue payload and a present one produces none. An API failure is logged and does not crash the job. A missing local artifact produces an issue. Every role in the lock file has at least one fallback. Running the job twice does not open a duplicate issue.
+
+**2.21 Runbooks and alert links for RAG.** Write the runbooks in docs/runbooks/, each with the headings Detect, Diagnose, Mitigate, Verify and Follow-up: (1) a quality drop (a canary alert), (2) a retired or changed model, (3) a cost or quota spike, (4) a bad crawl or snapshot (blocked by robots.txt, many 404s, empty pages, a failed promotion gate), (5) an index rollback, and (6) an injection incident. Detect says which alert or dashboard panel shows it. Diagnose says how to use the trace, the logs by request\_id and the Langfuse run comparison. Mitigate gives the exact command: switch the active snapshot, run the index rollback, switch to the fallback model, or enable the degraded mode. Follow-up adds a case to the golden set or the red-team set. Every alert rule in ops/ links to a runbook through an annotation.
+
+**Tests:** a script fails CI if an alert rule has no runbook\_url or the linked file is missing. A script fails if a runbook lacks any required heading. Rehearse two drills in dry-run mode and record the result in LOG.md: an index rollback and a canary alert (a deliberately degraded prompt must turn the canary red and the runbook steps must fix it).
+
+**Done when:** ingesting the same snapshot twice writes nothing and makes zero embedder calls (proven by an automated test); changing one page re-embeds only its changed chunks, and changing the chunker or embedder reprocesses everything; killing and resuming ingestion leaves no duplicates; baseline recall@5, MRR, faithfulness, citation accuracy and correct-refusal rate are in LOG.md with the ablation table split by language; judge agreement with your human labels is recorded; a flagged injection page never reaches the prompt and the answer ignores it (injection resistance is reported); the exact answer cache hits on repeats, misses after a snapshot, prompt or model change, and never caches answers that used a user's sources; a dashboard shows ingestion, RAG and cache metrics; one /ask trace in Langfuse shows every retrieval stage with chunk ids and scores; and CI runs the fixture eval gate and the idempotency test. For Week 2C: a second index version is built beside the active one, evaluated, activated and rolled back with evidence; every eval is an experiment run in Langfuse with full metadata; the lock file passes CI with approving run ids, fallbacks and model cards; the cost per 1,000 requests is reported and the 80% and 100% budget rules work; the online-evaluation loop and the canary run in dry-run mode and a simulated quality drop turns the canary red; and every alert links to a runbook.
+
+**Record in LOG.md:** the baseline and after numbers, the ablation table, tokens and cost per request, chunks embedded on the first versus second ingestion run, which Arabic keyword method you chose and why, a Langfuse trace screenshot, a Langfuse experiment-run comparison, the index version history with the promotion report, the cost per 1,000 requests, and a dashboard screenshot.
 
 ## Week 3: Agent
 
@@ -276,7 +368,7 @@ Goal: an agent that takes real actions safely.
 
 **Tests:** script FakeLLM outputs so each route is covered: an order question reaches the order tool, a knowledge question reaches RAG, chit-chat gets a direct reply. The maximum step count stops loops, and state persists across turns.
 
-**3.3 Guardrails.** Add input screening for prompt injection, an output groundedness check, and PII redaction.
+**3.3 Guardrails.** Add input screening for prompt injection (reusing the pattern file from step 2.5b), an output groundedness check, and PII redaction.
 
 **Tests:** a table-driven set of at least 20 injection strings (English and Arabic) that must be blocked, and 20 normal messages that must pass, so you also catch false positives. PII cases are redacted, and an answer that cites a source that was not retrieved is rejected.
 
@@ -308,9 +400,9 @@ Goal: an agent that takes real actions safely.
 
 **Tests:** a wrong extension, wrong content, empty file, oversize file, too many pages and an over-quota upload are rejected with a clear 4xx message; a duplicate checksum does nothing; deleting a source removes its chunks and embeddings; text is extracted from sample .txt, .md, English PDF and Arabic PDF fixtures; a corrupt PDF returns 422 and the job is marked failed with a reason; no file remains on disk after a request (list the temp folder); extracted text is not written to logs at INFO.
 
-**3.11 Isolation and untrusted content.** Filter retrieval by owner on every query (the step 2.4 rule, now tested with real uploads). Extend the injection guard from step 3.3 to screen retrieved chunks from every source, and never follow instructions found inside them. Label answers that used a user source (for example, from your file). Show a notice in the UI: do not upload sensitive data, because retrieved text is sent to AI providers whose free-tier terms can differ.
+**3.11 Isolation and untrusted content.** Filter retrieval by owner on every query (the step 2.4 rule, now tested with real uploads). Extend the injection guard from step 3.3 and the chunk flag from step 2.5b to screen retrieved chunks from every source, and never follow instructions found inside them. Label answers that used a user source (for example, from your file). Show a notice in the UI: do not upload sensitive data, because retrieved text is sent to AI providers whose free-tier terms can differ.
 
-**Tests:** a property-style test with several users and many files: a query by one user never returns another user's chunks, citations or filenames; a deleted source never appears; an uploaded file that says to ignore previous instructions or to reveal the system prompt does not change the answer behavior (add these cases to tests/redteam/); the notice is present in the UI.
+**Tests:** a property-style test with several users and many files (a cached answer built from one user's file is never served to another): a query by one user never returns another user's chunks, citations or filenames; a deleted source never appears; an uploaded file that says to ignore previous instructions or to reveal the system prompt does not change the answer behavior (add these cases to tests/redteam/); the notice is present in the UI.
 
 **3.12 Safe fetcher (SSRF guard).** Write one function that every outgoing page request must use. Allow only http and https on ports 80 and 443, with no credentials in the URL. Resolve the host and require every returned address to be public: block loopback, private, link-local (including the cloud metadata address 169.254.169.254), unique-local, multicast and unspecified ranges, in IPv4 and IPv6, and IPv4-mapped IPv6 addresses. Connect to the address you checked, so DNS rebinding cannot change it. Follow at most 3 redirects and re-validate each one. Add a timeout, a maximum body size (start with 2 MB), a content-type allowlist (text/html, text/plain, application/pdf), no cookies and no stored credentials, and obey robots.txt with the polite client from step 2.0a. The built-in crawl uses the same client with its allowlist.
 
@@ -392,11 +484,11 @@ Goal: choose default providers using data, not guesses.
 
 **Tests:** reuse the gate tests from step 2.10, lint the workflow files with actionlint in CI, and dry-run the nightly job with fakes to prove it produces the report artifacts.
 
-**5.7 Experiment tracking.** Use Langfuse for experiment tracking, so there is no extra service to run. Upload the golden set as a Langfuse dataset and run each eval as an experiment run over it. Every run records the git SHA, dataset version, prompt ids, provider, model and parameters as metadata (the reproducibility record from step 2.7), attaches its metrics as scores, and puts the run name in the report. Watch your monthly unit budget: a full run creates many traces, so keep run-level scores for every run and full traces only for failures, or run the full suite weekly.
+**5.7 Experiment tracking.** (RAG evals are already tracked from step 2.15; this step extends the same setup to ASR, TTS, voice and agent evals.) Use Langfuse for experiment tracking, so there is no extra service to run. Upload the golden set as a Langfuse dataset and run each eval as an experiment run over it. Every run records the git SHA, dataset version, prompt ids, provider, model and parameters as metadata (the reproducibility record from step 2.7), attaches its metrics as scores, and puts the run name in the report. Watch your monthly unit budget: a full run creates many traces, so keep run-level scores for every run and full traces only for failures, or run the full suite weekly.
 
 **Tests:** a run with FakeASR sends the expected metadata and scores to a mocked Langfuse client; the report contains the run name; if Langfuse is unreachable the eval still finishes and prints a warning; two runs with different prompt versions show different prompt ids; a test checks that a full run stays within the trace budget you set.
 
-**5.8 Model and provider registry.** Create configs/models.lock.yaml with the exact model id for each role, the date it was verified, and the eval run id that approved it. A model becomes primary only through a pull request that includes its approving run. For local models (Whisper, Piper voice, embedder, reranker) store versioned artifacts with a checksum and write a model card: purpose, version, license, eval results and known limits.
+**5.8 Model and provider registry.** (The lock file and the RAG roles are built in step 2.16; this step adds the ASR and TTS roles and local voice models.) Extend configs/models.lock.yaml with the exact model id for each role, the date it was verified, and the eval run id that approved it. A model becomes primary only through a pull request that includes its approving run. For local models (Whisper, Piper voice, embedder, reranker) store versioned artifacts with a checksum and write a model card: purpose, version, license, eval results and known limits.
 
 **Tests:** the lock file validates against a schema; CI fails if a primary model in the config is missing from the lock file or has no approving run id; the loader rejects a local model whose checksum does not match; a script fails if a model in the lock file has no model card.
 
@@ -414,9 +506,9 @@ Goal: faster, cheaper, and safe under quota limits.
 
 **Tests:** table-driven sentence splitting (Arabic marks, English, decimals like 3.5, abbreviations, no final punctuation). A streaming test with a slow fake LLM proves the first audio chunk arrives before the stream ends, chunks keep sentence order, and a client disconnect stops further TTS calls.
 
-**6.3 Caching.** Add exact and semantic caches and track the hit rate.
+**6.3 Caching.** The exact answer cache and the query-embedding cache already exist (steps 2.2 and 2.5c), with their key and privacy rules. Add the semantic cache and track the hit rate. It uses the same key parts as step 2.5c (snapshot id, fingerprint, prompt hash, model id, reply language), and it caches only answers that used built-in content. Choose the similarity threshold on the golden set and on adversarial pairs such as "refund within 7 days" versus "refund after 7 days", starting strict. Report the false-hit rate on a labeled sample.
 
-**Tests:** the same query hits and a different language or voice misses; entries expire with a fake clock. For the semantic cache, test near-duplicates (should hit) and different intents (must miss), because false hits are the real risk. Content flagged as PII is never cached.
+**Tests:** the same query hits and a different language or voice misses; entries expire with a fake clock. For the semantic cache, test near-duplicates (should hit) and different intents (must miss), because false hits are the real risk. Content flagged as PII is never cached, and neither are refusals, errors or answers that used a user's own sources.
 
 **6.4 Load test.** Use k6 or Locust with 5 concurrent sessions. Record p50 and p95 latency, error rate and cost per 1,000 requests.
 
@@ -426,11 +518,11 @@ Goal: faster, cheaper, and safe under quota limits.
 
 **Tests:** a WebSocket integration test connects, sends audio frames and receives partial and final results. Test voice activity detection on speech and silence fixtures, and check that new speech cancels playback (barge-in).
 
-**6.6 Index versioning.** Store each index with a version that records the embedding model, dimension and chunking settings (this builds on the pipeline fingerprint from steps 2.1 to 2.3b). Build a new index next to the old one, evaluate it on the golden set, then switch with one config value. Keep the previous index for a week so rollback is instant.
+**6.6 Index versioning.** (Built for the RAG index in step 2.14; here you rehearse a switch and a rollback on staging, and extend it to any new embedder or reranker.) Store each index with a version that records the embedding model, dimension and chunking settings (this builds on the pipeline fingerprint from steps 2.1 to 2.3b). Build a new index next to the old one, evaluate it on the golden set, then switch with one config value. Keep the previous index for a week so rollback is instant.
 
 **Tests:** retrieval reads only the active version; switching and rolling back change the results as expected on a fixture corpus; vectors of different dimensions can never be mixed in one index; a migration test builds v2 from a fixture and passes the retrieval checks.
 
-**6.7 Cost and token budgets.** Set daily token and cost budgets per role in config. At 80% raise an alert; at 100% switch to a cheaper role or a degraded mode (shorter answers, cache-only for repeated questions). In the nightly run, compare the cost per 1,000 requests with the last release.
+**6.7 Cost and token budgets.** (The RAG roles are covered in step 2.17; here you add the ASR and TTS budgets and the nightly comparison.) Set daily token and cost budgets per role in config. At 80% raise an alert; at 100% switch to a cheaper role or a degraded mode (shorter answers, cache-only for repeated questions). In the nightly run, compare the cost per 1,000 requests with the last release.
 
 **Tests:** with a fake clock and fake usage, crossing 100% triggers the degraded mode and a new day resets it; the 80% alert rule passes a promtool test; the comparison script flags a 20% cost increase on synthetic data and ignores a 2% change.
 
@@ -472,15 +564,15 @@ Goal: safe releases with rollback and alerts.
 
 **Tests:** on a throwaway branch add a fake secret and confirm gitleaks fails, add a known-vulnerable pinned dependency and confirm pip-audit fails, and use a known-bad base image to confirm Trivy fails. Revert each one afterwards.
 
-**7.8 Online evaluation and feedback loop.** Sample a small share of production traces (for example 5%), score them with the judge role for faithfulness and relevance, and attach the scores to the traces in Langfuse. Thumbs-down feedback and escalations become candidate cases. Once a week, review about 10 candidates and add the good ones to the golden set as a new dataset version.
+**7.8 Online evaluation and feedback loop.** (The RAG loop is built in step 2.18; here you turn it on against real staging and production traffic and add voice and agent traces.) Sample a small share of production traces (for example 5%), score them with the judge role for faithfulness and relevance, and attach the scores to the traces in Langfuse. Thumbs-down feedback and escalations become candidate cases. Once a week, review about 10 candidates and add the good ones to the golden set as a new dataset version.
 
 **Tests:** the sampler picks about the configured share with a seeded random generator; the scoring job is idempotent and never scores the same trace twice; exported candidate cases pass the dataset validator; PII is redacted in exported cases; a failed judge call is retried and then skipped without crashing the job.
 
-**7.9 Drift and canary monitoring.** Run a daily canary eval of the production configuration on a small fixed set, and alert if quality drops more than your threshold below the release baseline. Track the distributions that signal drift: top retrieval score, no-answer rate, escalation rate, ASR confidence and the language mix of questions, each against a rolling baseline.
+**7.9 Drift and canary monitoring.** (The RAG canary, drift checks and alert rules are built in step 2.19; here you deploy them to Grafana Cloud and add ASR confidence, escalation rate and voice metrics.) Run a daily canary eval of the production configuration on a small fixed set, and alert if quality drops more than your threshold below the release baseline. Track the distributions that signal drift: top retrieval score, no-answer rate, escalation rate, ASR confidence and the language mix of questions, each against a rolling baseline.
 
 **Tests:** drift detector unit tests with synthetic data (no change gives no alert, a shifted mean gives an alert); the alert rules pass promtool tests; a dry run of the canary job with fakes produces a report and the right exit code.
 
-**7.10 Deprecation watch.** Add a weekly job that lists the models each provider offers (where the provider has a list endpoint) and compares them with models.lock.yaml. If a pinned model is missing or marked for retirement, the job opens an issue naming the affected role and its fallback.
+**7.10 Deprecation watch.** (The RAG roles are covered in step 2.20; here you add the ASR and TTS models.) Add a weekly job that lists the models each provider offers (where the provider has a list endpoint) and compares them with models.lock.yaml. If a pinned model is missing or marked for retirement, the job opens an issue naming the affected role and its fallback.
 
 **Tests:** with a fake provider listing, a missing pinned model produces an issue payload and a present one produces none; an API failure is logged and does not crash the job; every role in the lock file has at least one fallback.
 
@@ -496,7 +588,7 @@ Goal: safe releases with rollback and alerts.
 
 **Tests:** a script checks that every relative link in the README resolves. A docs test follows the three-step add-a-provider guide with a dummy provider and confirms it passes the contract tests. A script compares the numbers in the README with the latest eval report.
 
-**8.2 ADRs.** Write at least five (for example: provider registry, hybrid retrieval, model tiering, shared rate limiter, evals outside src). Consider a sixth on idempotent ingestion with a pipeline fingerprint.
+**8.2 ADRs.** Write at least five (for example: provider registry, hybrid retrieval, model tiering, shared rate limiter, evals outside src). Consider more on idempotent ingestion with a pipeline fingerprint, and on index versioning with a promotion gate.
 
 **Tests:** the ADR lint from step 0.5 passes on all files, and numbering is sequential.
 
@@ -516,7 +608,7 @@ Goal: safe releases with rollback and alerts.
 
 **Tests:** a mock interview: explain the architecture in five minutes to someone else, then answer their questions using your own measured numbers without notes.
 
-**8.7 Runbooks and audit log.** Write three runbooks: a quality drop, a provider retiring a model, and a cost spike. Each one says how to detect it, diagnose it and roll back. Store every approval or rejection of a sensitive action in an append-only audit table with the actor, time, decision and trace id.
+**8.7 Runbooks and audit log.** (The six RAG runbooks are written in step 2.21; here you add the voice, provider-outage and approval runbooks and the audit log.) Write the extra runbooks: a voice quality drop (ASR or TTS), a provider outage with fallback in use, and a stuck approval queue. Each one says how to detect it, diagnose it and roll back. Store every approval or rejection of a sensitive action in an append-only audit table with the actor, time, decision and trace id.
 
 **Tests:** a script fails CI if an alert has no runbook link; the audit table rejects updates and deletes (a test attempts both); every approval-flow test also asserts that an audit row was written.
 
@@ -530,7 +622,7 @@ Goal: safe releases with rollback and alerts.
 
 ## If you are stuck or behind
 
-- **Behind schedule:** cut in this order: user-submitted websites (steps 3.12 and 3.13), P2 items (WebSocket, voice activity detection, semantic cache), then streaming, then Terraform (document the manual setup instead). In Week 2, move steps 2.11 and 2.12 into Week 3 before cutting anything else. Never cut evals, observability or incremental ingestion (step 2.3b); they are what make the project stand out.
+- **Behind schedule:** cut in this order: user-submitted websites (steps 3.12 and 3.13), P2 items (WebSocket, voice activity detection, semantic cache), then streaming, then Terraform (document the manual setup instead). In Week 2, cut in this order: step 2.20, then 2.18 (build only the scoring job), then 2.19, then move steps 2.11 and 2.12 into Week 3. Keep 2.14 to 2.17 (index versioning, experiment tracking, the model lock and cost budgets). Never cut evals, observability or incremental ingestion (step 2.3b); they are what make the project stand out.
 - **No payment method for cloud:** use a no-card container host, or run locally and show a video. The Docker image stays portable either way.
 - **Machine too slow:** use hosted inference only, run only the core compose profile, and start the observability profile only when you need screenshots.
 - **Quota exhausted:** rely on fallbacks and caches, run full evals at night, use smaller subsets during the day.
@@ -544,6 +636,8 @@ Goal: safe releases with rollback and alerts.
 - How you made adding a new model a one-file change.
 - A voice or dialect problem you measured and solved.
 - How you decided what to cut when time ran short.
+- How you stopped injected instructions in crawled pages from reaching the model, and how you proved the cache never served a stale or private answer.
+- How you shipped a chunking or embedding change safely: a new index version, an evaluation gate, a one-line switch and an instant rollback.
 - How you made ingestion idempotent and proved that a second run does nothing (the "run it twice" test).
 
 ## Final deliverables checklist

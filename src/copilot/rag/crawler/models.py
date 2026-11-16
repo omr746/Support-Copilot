@@ -26,6 +26,7 @@ class PageVersion:
     needs_js: bool = False
     is_removed: bool = False
     last_verified_at: str = ""
+    extractor: str = ""
 
     def to_manifest_entry(self) -> SnapshotManifestEntry:
         """Convert page version to public manifest entry (strictly omitting page text)."""
@@ -41,6 +42,7 @@ class PageVersion:
             needs_js=self.needs_js,
             is_removed=self.is_removed,
             last_verified_at=self.last_verified_at or self.fetched_at,
+            extractor=self.extractor,
         )
 
 
@@ -59,6 +61,7 @@ class SnapshotManifestEntry:
     needs_js: bool = False
     is_removed: bool = False
     last_verified_at: str = ""
+    extractor: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Convert to dictionary suitable for JSONL serialization."""
