@@ -10,10 +10,12 @@ try:
 except ImportError:
     pass
 
+from tests.fakes.fake_embedder import FakeEmbedder
 from tests.fakes.fake_token_counter import FakeCharTokenCounter, FakeWordTokenCounter
 
 __all__ = [
     "FakeCharTokenCounter",
+    "FakeEmbedder",
     "FakeLLM",
     "FakeSleeper",
     "FakeWordTokenCounter",
