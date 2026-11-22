@@ -883,3 +883,148 @@ Numbers:
 - 79 unit tests passing across all test suites (20 in `test_cleaner_features.py`, 6 in `test_tokens.py`, 20 in `test_normalize.py`, 23 in `test_chunker.py`, 9 in `test_fingerprint.py`).
 - 79 out of 79 tests passing in 0.340s.
 - `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+## 2026-11-17 · Session 13: Implement Step 2.2 Embedder Port, Modular Package Architecture, Query Cache, and Fakes
+
+Did:
+- Implemented Step 2.2 Embedder Port, Vector Rules, and Query Caching adhering to all 17 plan rules (port protocol, vector shape/finite/norm guarantees, no fallback across embedders, index fingerprint readiness check, `build_embedding_input`, `prepare_query_text`, `compute_embedding_input_hash`, document token budget check, query truncation at `max_query_tokens` with span flag, empty text rejection, batching with length sorting and order restoration, and PII-exempt query cache).
+- Structured Embedder into a dedicated modular package (`src/copilot/rag/embedder/`):
+  - `src/copilot/rag/embedder/base.py`: synchronous `Embedder` protocol and `BaseEmbedder` with batching, length sorting, and token counters.
+  - `src/copilot/rag/embedder/vector.py`: vector math and invariants (`normalize_l2`, `is_finite_and_normalized`).
+  - `src/copilot/rag/embedder/inputs.py`: standardized input builders (`build_embedding_input`, `prepare_query_text`, `compute_embedding_input_hash`, `detect_pii`).
+  - `src/copilot/rag/embedder/validation.py`: startup budget guard (`validate_chunker_embedder_budget`) and readiness check (`verify_embedder_fingerprint_readiness`).
+  - `src/copilot/rag/embedder/cache.py`: `QueryCacheBackend` protocol, `InMemoryQueryCache` with TTL and clock injection, `CachedQueryEmbedder` with SHA-256 keys and PII exemptions.
+  - `src/copilot/rag/embedder/__init__.py`: clean public exports preserving full backward compatibility.
+- Implemented `FakeEmbedder` in test fakes (`tests/fakes/fake_embedder.py`):
+  - Deterministic word and character trigram feature hashing normalized to unit sphere.
+  - Semantic Arabic, English, and cross-lingual concept anchors ensuring paraphrases outscore unrelated text.
+  - Injected faults (`fail_with`), latency simulation (`delay_seconds`), and operational counters.
+  - Re-exported via `tests/fakes/__init__.py`.
+- Created Contract Test Suite (`tests/contract/test_embedder_contract.py`):
+  - Reusable `check_embedder_contract(embedder: Embedder)` verifying dtype, dimension, norm, determinism, batch consistency, order preservation, empty input handling, and document budget validation.
+- Created Unit Test Suite (`tests/unit/test_embedder.py`):
+  - Tests for semantic paraphrase behavior, fingerprint sensitivity, no-fallback architectural rules, readiness check, inputs and hashes, and query caching with TTL and PII skipping.
+
+Broke:
+- Falsy evaluation in `InMemoryQueryCache` (`bool(cache) == False` when empty because `__len__` returned 0) when using `cache or InMemoryQueryCache()`, which initialized a separate instance and ignored injected mock clocks.
+- Missing `dataclasses` import in test suite.
+- Arabic paraphrase scoring lower than unrelated text due to unnormalized taa marbuta/alif in concept synonyms and unweighted procedural stopwords.
+
+Fixed:
+- Replaced `cache or InMemoryQueryCache()` with explicit `cache if cache is not None else InMemoryQueryCache()` and added `__bool__` returning `True`.
+- Enhanced `FakeEmbedder` concept synonyms with Arabic normalization, prefix stripping (`ال`, `و`, `بال`), and downweighted procedural stopwords.
+- Added standalone `compute_embedder_fingerprint(config)` in `copilot.rag.fingerprint`.
+- Modularized monolithic embedder file into dedicated single-responsibility modules under `src/copilot/rag/embedder/` and moved `FakeEmbedder` to `tests/fakes/`.
+
+Numbers:
+- 364 tests passing in `uv run pytest` (1 contract test in `test_embedder_contract.py`, 15 unit tests in `test_embedder.py`, 348 existing tests).
+- 0 lint errors in `ruff check`.
+- 0 formatting issues across 99 files in `ruff format --check`.
+- 0 type errors across 62 source files in `mypy src`.
+- 7 architectural contracts kept, 0 broken in `lint-imports`.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+## 2026-11-22 · Session 14: Harden Embedder Base Implementation Against Review Findings (Findings 6 to 14)
+
+Did:
+- Validated `max_query_tokens` in `_prepare_query_with_truncation` (Finding 6): strictly enforces positive integers, rejecting `<= 0` and booleans (`isinstance(bool)` check).
+- Aligned query limit with model capacity (Finding 7): calculates `effective_limit = min(max_query_tokens, model_query_budget)` where `model_query_budget = max(1, max_length - query_prefix_tokens - special_tokens)`.
+- Made `special_tokens` configurable in `EmbedderConfig` (Finding 8): added `special_tokens: int = 2` (default for modern embedding models) with validation, dictionary serialization, and wired into budget guards.
+- Fixed metrics token accounting (Finding 9): rejected documents no longer increment `total_tokens_count` or `input_tokens_accepted`. Added granular metrics: `input_tokens_received`, `input_tokens_accepted`, `input_tokens_embedded`.
+- Bound tokenizer identity to fingerprint (Finding 10): added `tokenizer_id` to `EmbedderConfig` and validated that injected tokenizers match or enrich config metadata for fingerprint reproducibility.
+- Precomputed prefix tokens and budgets once at initialization (Finding 11): eliminated repetitive prefix token counts across document loops.
+- Applied thread-safe synchronization (Finding 12): wrapped all counter and metrics updates with `threading.Lock`.
+- Implemented batching, length-sorting, and original order restoration in `BaseEmbedder` (Findings 13 & 14): `embed_documents` and `embed_query` are now fully implemented in `BaseEmbedder` as template methods, slicing into batches of `max_batch_size`, sorting by length inside batches, delegating to `_raw_embed_batch`, and restoring exact document sequence.
+- Added comprehensive unit tests in `TestBaseEmbedderRules` covering all 9 findings.
+- Centralized validation rules into `src/copilot/rag/embedder/validation.py`:
+  - Added standalone `validate_document_text` and `validate_query_max_tokens` functions in `validation.py`.
+  - Refactored `BaseEmbedder` in `base.py` to delegate document text validation and query parameter validation to `validation.py`, keeping `base.py` focused cleanly on batching, sorting, order restoration, and execution.
+  - Re-exported validation functions from `copilot.rag.embedder` and `copilot.rag`.
+
+Broke:
+- Nothing.
+
+Fixed:
+- Query truncation indexing with non-positive or boolean values.
+- Mismatch between query truncation defaults and small model sequence limits.
+- Hardcoded special token counts preventing model-specific budgets.
+- Pre-validation token counter corruption on rejected documents.
+- Redundant prefix tokenization per document chunk.
+- Unsynchronized metric counters under multithreaded inference.
+- Missing length-sorting batch implementation in `BaseEmbedder`.
+
+Numbers:
+- 372 tests passing in `uv run pytest` (1 contract test in `test_embedder_contract.py`, 23 unit tests in `test_embedder.py`, 348 existing tests).
+- 0 lint errors in `ruff check`.
+- 0 formatting issues across 99 files in `ruff format --check`.
+- 0 type errors across 62 source files in `mypy src`.
+- 7 architectural contracts kept, 0 broken in `lint-imports`.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+## 2026-11-22 · Session 15: Vector Operations Hardening and Token Budget / Fingerprint Verification
+
+Did:
+- Unified Effective Token Budget Calculation (`src/copilot/rag/embedder/validation.py`):
+  - Created standalone `compute_effective_document_budget` and `compute_effective_query_budget` used identically by startup budget guards and `BaseEmbedder`.
+  - Replaced masking `max(1, ...)` with explicit `ValueError` when available budget is $\le 0$ (e.g. passage prefix + special tokens $\ge$ max_length).
+- Active Index Fingerprint Enforcement & Logging (`src/copilot/rag/embedder/validation.py`):
+  - Hardened `verify_embedder_fingerprint_readiness` to block index loading and retrieval on mismatch, emitting structured error logs with model id, revision, and both digests.
+- Vector Operations & Invariants Hardening (`src/copilot/rag/embedder/vector.py`):
+  - Strictly rejected inputs containing NaN or Infinity before normalization (P1).
+  - Explicitly rejected zero vectors (norm $< \text{eps}$) since they have no direction on the unit sphere (P1).
+  - Strictly validated shapes: 1D `(d,)` with $d > 0$ and 2D `(n, d)` with $d > 0$, rejecting 3D arrays and empty dimensions (P1).
+  - Handled empty 2D batches `(0, d)` gracefully while rejecting empty 1D vectors `(0,)` (P2).
+  - Validated that `eps` is a positive finite float and `tol` is a non-negative finite float (P2).
+  - Guarded against numeric overflow during `linalg.norm` and `.astype(np.float32)` with post-normalization finite validation (P2).
+- Added comprehensive unit tests in `TestVectorOperationsAndInvariants` and `TestBudgetAndReadinessHardening`.
+
+Broke:
+- Nothing.
+
+Fixed:
+- Zero vector and NaN acceptance in `normalize_l2`.
+- Arbitrary 3D tensor inputs in vector normalization.
+- Empty arrays passing `is_finite_and_normalized`.
+- Silent masking of non-positive token budgets.
+- Unlogged fingerprint mismatch handling.
+
+Numbers:
+- 381 tests passing in `uv run pytest` (1 contract test in `test_embedder_contract.py`, 32 unit tests in `test_embedder.py`, 348 existing tests).
+- 0 lint errors in `ruff check`.
+- 0 formatting issues across 99 files in `ruff format --check`.
+- 0 type errors across 62 source files in `mypy src`.
+- 7 architectural contracts kept, 0 broken in `lint-imports`.
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.
+
+## 2026-11-22 · Session 16: Query Cache Memory Bound, Single-Flight Coalescing, and HMAC Hash Privacy
+
+Did:
+- Cache Memory Bounding & LRU Eviction (`src/copilot/rag/embedder/cache.py` - Finding P1):
+  - Added configurable `max_size: int = 10_000` to `InMemoryQueryCache` with strict positive integer validation (rejecting non-positive values, booleans, and floats).
+  - Implemented $O(1)$ LRU eviction using `collections.OrderedDict`, updating recency on `get()` and `set()`.
+  - Added two-tier eviction on full capacity: first purges already-expired entries; if still at capacity, evicts least recently used (LRU) entry.
+  - Added explicit `cleanup_expired() -> int` method to actively purge expired entries and return the count.
+  - Added `eviction_count` metric tracking forced LRU evictions.
+- Concurrent Duplicate Inference Deduplication (`src/copilot/rag/embedder/cache.py` - Finding P1):
+  - Created thread-safe `SingleFlight` coalescing utility implementing the single-flight pattern with `threading.Event`.
+  - Integrated into `CachedQueryEmbedder.embed_query`: concurrent identical in-flight queries coalesce so that only the leader thread invokes model inference.
+  - Followers wait on the leader's event, receive a copy of the computed vector, and increment `coalesced_requests`.
+  - Cleanly propagated exceptions to all waiting threads without deadlocks or memory leaks.
+- Hash Privacy Hardening with HMAC (`src/copilot/rag/embedder/cache.py` - Finding P1/P2):
+  - Evaluated plain SHA-256 vs keyed HMAC: documented vulnerability of raw SHA-256 cache keys to offline dictionary and rainbow table recovery of common queries if cache keys or stores are exposed.
+  - Created `compute_query_cache_key` supporting optional `cache_key_secret` (HMAC-SHA256).
+  - Added `cache_key_secret: str | bytes | None = None` parameter to `CachedQueryEmbedder` with validation.
+- Re-exported `SingleFlight` and `compute_query_cache_key` in `src/copilot/rag/embedder/__init__.py` and `src/copilot/rag/__init__.py`.
+- Added 7 new unit tests in `tests/unit/test_embedder.py` covering all new functionality and edge cases.
+
+Broke:
+- Nothing.
+
+Fixed:
+- Unbounded memory growth in `InMemoryQueryCache`.
+- Redundant duplicate model inference under concurrent identical queries.
+- Vulnerability of cache keys to offline dictionary/rainbow table attacks.
+
+Numbers:
+- 39 tests passing in `tests/unit/test_embedder.py` (total embedder tests).
+- `scripts/check_docs.py` and `scripts/check_adrs.py` passed with 0 errors.

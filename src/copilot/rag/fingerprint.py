@@ -43,6 +43,16 @@ def compute_pattern_version(source: str | bytes | Path) -> str:
     return hashlib.sha256(content).hexdigest()[:16]
 
 
+def compute_embedder_fingerprint(config: EmbedderConfig) -> str:
+    """Compute deterministic SHA-256 fingerprint digest of an EmbedderConfig."""
+    payload = {
+        "_schema": FINGERPRINT_SCHEMA_VERSION,
+        "_type": "embedder",
+        "embedder_config": config.to_dict(),
+    }
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
 @dataclasses.dataclass(frozen=True)
 class ChunkerConfig:
     """Immutable, typed chunker configuration preventing configuration drift."""
@@ -154,6 +164,11 @@ class EmbedderConfig:
     query_prefix: str = ""
     passage_prefix: str = ""
     quantization: str = "none"
+    runtime: str = "onnx"  # "onnx" | "torch" | "fake"
+    embed_text_source: str = "original"  # "original" | "normalized"
+    truncate_dim: int | None = None
+    special_tokens: int = 2
+    tokenizer_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_id, str) or not self.model_id:
@@ -176,11 +191,35 @@ class EmbedderConfig:
             raise ValueError(f"passage_prefix must be a str, got {self.passage_prefix!r}")
         if not isinstance(self.quantization, str) or not self.quantization:
             raise ValueError(f"quantization must be a non-empty str, got {self.quantization!r}")
+        if self.runtime not in ("onnx", "torch", "fake"):
+            raise ValueError(
+                f"runtime must be one of ('onnx', 'torch', 'fake'), got {self.runtime!r}"
+            )
+        if self.embed_text_source not in ("original", "normalized"):
+            raise ValueError(
+                f"embed_text_source must be 'original' or 'normalized', got {self.embed_text_source!r}"
+            )
+        if self.truncate_dim is not None:
+            if type(self.truncate_dim) is not int or not (0 < self.truncate_dim <= self.dimension):
+                raise ValueError(
+                    f"truncate_dim must be positive int <= dimension ({self.dimension}), got {self.truncate_dim!r}"
+                )
+        if type(self.special_tokens) is not int or self.special_tokens < 0:
+            raise ValueError(
+                f"special_tokens must be a non-negative int, got {self.special_tokens!r}"
+            )
+        if self.tokenizer_id is not None and (
+            not isinstance(self.tokenizer_id, str) or not self.tokenizer_id.strip()
+        ):
+            raise ValueError(
+                f"tokenizer_id must be a non-empty string or None, got {self.tokenizer_id!r}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to canonical dictionary."""
         return {
             "dimension": self.dimension,
+            "embed_text_source": self.embed_text_source,
             "max_length": self.max_length,
             "model_id": self.model_id,
             "normalize_embeddings": self.normalize_embeddings,
@@ -189,6 +228,10 @@ class EmbedderConfig:
             "quantization": self.quantization,
             "query_prefix": self.query_prefix,
             "revision": self.revision,
+            "runtime": self.runtime,
+            "special_tokens": self.special_tokens,
+            "tokenizer_id": self.tokenizer_id,
+            "truncate_dim": self.truncate_dim,
         }
 
     @classmethod
@@ -197,7 +240,7 @@ class EmbedderConfig:
         if not isinstance(data, dict):
             raise TypeError(f"Expected dict for EmbedderConfig, got {type(data)}")
 
-        required = {
+        core_required = {
             "dimension",
             "max_length",
             "model_id",
@@ -208,10 +251,18 @@ class EmbedderConfig:
             "query_prefix",
             "revision",
         }
+        all_allowed = core_required | {
+            "runtime",
+            "embed_text_source",
+            "truncate_dim",
+            "special_tokens",
+            "tokenizer_id",
+        }
         actual = set(data.keys())
-        if actual != required:
-            missing = required - actual
-            unknown = actual - required
+
+        missing = core_required - actual
+        unknown = actual - all_allowed
+        if missing or unknown:
             errs: list[str] = []
             if missing:
                 errs.append(f"missing {sorted(missing)}")
@@ -229,6 +280,11 @@ class EmbedderConfig:
             quantization=data["quantization"],
             query_prefix=data["query_prefix"],
             revision=data["revision"],
+            runtime=data.get("runtime", "onnx"),
+            embed_text_source=data.get("embed_text_source", "original"),
+            truncate_dim=data.get("truncate_dim", None),
+            special_tokens=data.get("special_tokens", 2),
+            tokenizer_id=data.get("tokenizer_id", None),
         )
 
 
@@ -305,12 +361,7 @@ class PipelineFingerprint:
         """Deterministic SHA-256 digest over embedder model configuration, or None if not configured."""
         if self.embedder_config is None:
             return None
-        payload = {
-            "_schema": FINGERPRINT_SCHEMA_VERSION,
-            "_type": "embedder",
-            "embedder_config": self.embedder_config.to_dict(),
-        }
-        return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+        return compute_embedder_fingerprint(self.embedder_config)
 
     @property
     def full_digest(self) -> str:

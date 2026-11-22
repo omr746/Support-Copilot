@@ -1,8 +1,10 @@
 # Support Copilot: Step-by-Step Execution Plan
 
-*Version 0.4 · November 12, 2026 · Companion to the PRD · about 10 weeks in practice (Week 2 is split into 2A, 2B and 2C)*
+*Version 0.5 · November 17, 2026 · Companion to the PRD · about 10 weeks in practice (Week 2 is split into 2A, 2B and 2C)*
 
 **Change in v0.2:** Week 2 is rewritten for professional, idempotent RAG from crawl to answer. New step 2.3b (incremental ingestion), a pipeline fingerprint, a content hash on cleaned text, a snapshot-to-page-version schema, ingestion metrics and spans, retrieval-stage tracing, deeper evals with a reproducibility record, and step 2.13 (judge calibration). This satisfies FR-RAG-4.
+
+**Change in v0.5:** step 2.2 is rewritten with explicit port, vector-space, input and reliability rules, and new step 2.2b adds an embedding model bake-off and the real adapter. The embedding cache is now keyed by a new embedding\_input\_hash (the exact text sent to the embedder), and the embedded text defaults to the original text, with the choice measured in step 2.7. Hosted embeddings (Gemini) are deferred.
 
 **Change in v0.4:** the RAG part is now complete in Week 2. New Week 2C (steps 2.14 to 2.21) adds index versioning, experiment tracking, the model and prompt lock, cost and token budgets, online evaluation, drift and canary monitoring, the deprecation watch, and runbooks, all scoped to RAG. Later weeks extend the same machinery to ASR, TTS, voice and the agent. Week 2 now takes about three weeks, so the plan runs about 10 weeks unless you cut scope (see "If you are stuck or behind").
 
@@ -146,9 +148,9 @@ Set a budget alert in Billing right away. Done when a public URL returns ok on /
 
 ## Week 2: RAG (professional, idempotent, observable, with LLMOps)
 
-Goal: grounded answers with citations over the built-in WE snapshot, where re-running ingestion does nothing when nothing changed, every stage is observable, every number you measure can be reproduced, and the whole RAG part can be versioned, rolled back, monitored and operated. This week has about 36 steps, so treat it as three weeks (2A, 2B and 2C).
+Goal: grounded answers with citations over the built-in WE snapshot, where re-running ingestion does nothing when nothing changed, every stage is observable, every number you measure can be reproduced, and the whole RAG part can be versioned, rolled back, monitored and operated. This week has about 37 steps, so treat it as three weeks (2A, 2B and 2C).
 
-- **Week 2A (ingest and answer):** 2.0a, 2.0b, 2.0c, 2.1, 2.2, 2.3, 2.3b, 2.4, 2.5, 2.5a, 2.5b, 2.5c. Exit: a cited answer from the real snapshot and a passing "run it twice" test.
+- **Week 2A (ingest and answer):** 2.0a, 2.0b, 2.0c, 2.1, 2.2, 2.2b, 2.3, 2.3b, 2.4, 2.5, 2.5a, 2.5b, 2.5c. Exit: a cited answer from the real snapshot and a passing "run it twice" test.
 - **Week 2B (measure and observe):** 2.6 to 2.13. Exit: baseline numbers with a before/after, a dashboard, a trace and a CI gate.
 - **Week 2C (LLMOps for RAG):** 2.14 to 2.21. Exit: an index switched and rolled back with evidence, experiment runs in Langfuse, a model lock file, a canary alert demonstrated in dry-run mode, and runbooks linked from every alert.
 - If time is short, cut in this order: 2.20, 2.18 (build only the scoring job), 2.19, then move 2.11 and 2.12 to Week 3. Keep 2.14 to 2.17. Never cut 2.3b, 2.7, 2.8 or 2.9.
@@ -156,7 +158,7 @@ Goal: grounded answers with citations over the built-in WE snapshot, where re-ru
 **Design rules for this week**
 
 1. **Identity by content.** A page version is identified by the hash of its cleaned main text. A chunk is identified by the hash of its normalized text plus its section path.
-2. **Pipeline fingerprint.** Every page version and chunk records a fingerprint: a hash of the cleaner version, normalizer version, chunker settings, embedder id and embedder dimension. If the fingerprint changes, affected items are reprocessed. If not, they are skipped.
+2. **Pipeline fingerprint.** Every page version and chunk records a fingerprint: a hash of the cleaner version, normalizer version, chunker settings, the embedder settings (model id, revision, dimension, prefixes, pooling, quantization, runtime and embed\_text\_source). If the fingerprint changes, affected items are reprocessed. If not, they are skipped.
 3. **Snapshots are views.** A snapshot is a list of page-version ids. Chunks belong to a page version. Unchanged pages are shared between snapshots, so nothing is duplicated.
 4. **Everything is an upsert.** Every write uses a unique key, so running a job twice or resuming a killed job cannot create duplicates.
 5. **Every stage emits a metric and a span** with bounded labels (source type, outcome). Never user, session or request ids as labels.
@@ -179,17 +181,67 @@ Store each page version with URL, canonical URL, title, language, fetched-at tim
 
 **Tests:** a dry run makes no network calls and writes nothing. A resume continues after an interruption without duplicates. The summary counts match a fake server with known pages. The exit code is non-zero when the failure rate is above a threshold. Running the crawl twice against an unchanged fake server reports everything as unchanged and creates no new page versions.
 
-**2.1 Normalization, chunking and fingerprint.** Chunk by headings (start with 500 to 800 tokens and some overlap). Normalize Arabic text before chunking (diacritics, alef, yaa and taa marbuta variants, Arabic-Indic digits) and keep both the original and the normalized text, so users always see the original. Keep metadata: source type (builtin, upload or website), owner id (empty for built-in), source id, page version id, URL or filename, title, section path, language, fetched-at time, a chunk content hash (normalized text plus section path) and the fingerprint parts (normalizer version, chunker settings). Chunk ids are deterministic: derived from the page version id, section path and chunk index.
+**2.1 Normalization, chunking and fingerprint.** Chunk by headings (start with 500 to 800 tokens and some overlap). Normalize Arabic text before chunking (diacritics, alef, yaa and taa marbuta variants, Arabic-Indic digits) and keep both the original and the normalized text, so users always see the original. Keep metadata: source type (builtin, upload or website), owner id (empty for built-in), source id, page version id, URL or filename, title, section path, language, fetched-at time, a chunk content hash (normalized text plus section path) and the fingerprint parts (normalizer version, chunker settings). Both texts are stored, because the normalized text serves keyword search, the chunk hash and deduplication, while the text that is embedded is chosen by the embedder setting embed\_text\_source (original by default, see steps 2.2 and 2.7). Chunk ids are deterministic: derived from the page version id, section path and chunk index.
 
 **Tests:** no chunk exceeds the token limit, overlap is respected, metadata is kept (source type, owner, language, page version), Arabic and English text both work, normalization changes the search text but never the text shown to the user, an empty document is handled, and a short section is not split across a heading. The same input always gives the same chunk ids and chunk hashes. Changing one sentence changes the hash of the chunk that contains it (and at most its overlap neighbor), and no others. Changing the chunker settings or the normalizer version changes the fingerprint.
 
-**2.2 Embeddings.** Put an Embedder port in front of a small multilingual CPU model that handles Arabic, English and cross-language search (fastembed or sentence-transformers CPU build; check the size and license on the model card). Gemini embeddings can be a second provider. The port exposes model\_id, dimension and a fingerprint string, so the pipeline fingerprint never depends on provider details.
+**2.2 Embeddings (port, rules and fake).** Put an Embedder port in front of the embedding model, so the pipeline never depends on one provider. This step builds the port, the config, the fake, the tokenizer link, the contract tests and the query cache. Step 2.2b picks the real model and writes its adapter. There is no hosted embedder in Week 2 (see "Deferred" below).
 
-**Tests:** an Embedder contract suite: the output dimension matches the config, the same text gives the same vector, a batch equals single calls. A sanity test checks that a paraphrase scores higher than an unrelated sentence, in Arabic, in English and across languages (an Arabic question against English text). FakeEmbedder counts its calls (step 2.3b needs this) and is used everywhere else.
+*Port rules*
 
-*Query-embedding cache:* wrap the embedder with a Cached wrapper for queries (Redis, with a TTL). The key is a hash of the normalized query text plus the embedder fingerprint. Never cache raw query text as the key. Skip the cache for queries flagged as containing PII.
+1. The port is synchronous with two methods: embed\_documents(texts) returns a float32 array of shape (n, d), and embed\_query(text) returns a float32 array of shape (d). They are separate because many multilingual models need different prefixes for queries and documents. The API layer calls embed\_query through a thread pool, one call at a time.
+2. Each embedder exposes config (the EmbedderConfig from step 2.1), fingerprint, and tokenizer (a TokenCounter built from the model's own tokenizer, with its own tokenizer\_id).
+3. Every returned vector is float32, has the configured dimension, is finite, and is L2-normalized to within 1e-3. If the model does not normalize, the adapter does, so cosine similarity equals the dot product.
+4. EmbedderConfig holds: model\_id, revision (a required commit hash), dimension, max\_length, query\_prefix, passage\_prefix, pooling, normalize\_embeddings, quantization, runtime (onnx or torch) and embed\_text\_source (original or normalized). If you truncate dimensions, add truncate\_dim. Every field goes into the pipeline fingerprint, so a prefix or pooling change can never reuse old vectors.
+5. Adding a provider means one file and one config block. Failures map to the core errors, plus a ModelLoadError.
 
-**Tests:** the second identical query is a hit with no embedder call; a different embedder fingerprint or a different normalized text is a miss; entries expire with a fake clock; a PII-flagged query is never cached; hit and miss counters increase.
+*Vector space rules*
+
+6. There is no fallback across embedders. Vectors from different models cannot be compared, so a FallbackEmbedder must not exist (enforce it with an import-linter rule). A failure is an error. A different model means a new index version (step 2.14).
+7. At startup and in /readyz, the active index's embedder fingerprint must equal the loaded embedder's fingerprint. A mismatch means the app is not ready.
+8. Use the same runtime for building the index, running evals and serving production. An int8 ONNX model and a torch fp32 model give slightly different vectors, which is why runtime and quantization are in the fingerprint.
+
+*Input rules*
+
+9. One function, build\_embedding\_input(chunk), builds the section path, a blank line, and the chunk text (the design from step 2.1). Ingestion and evals both call it. Prefixes are added inside the adapter, never by callers.
+10. embed\_text\_source decides which stored text is embedded. The default is the original text (NFC and whitespace cleanup only), because embedding models were trained on raw text. The normalized text is used for keyword search, the chunk hash and deduplication. Step 2.7 compares the two sources per language, and the choice is then frozen in the model card. Queries get the same transform as documents.
+11. Never truncate documents silently. The chunker already guarantees the limit, and the adapter re-checks with the tokenizer and raises InvalidInputError for a text that is too long. Queries are truncated on purpose at max\_query\_tokens (start at 256) and the span records truncated=true. Empty or whitespace-only text is rejected.
+12. The chunker limit is max\_length minus special tokens minus prefix tokens. Check it at startup (the guard from step 2.1).
+13. Two hashes, two jobs: chunk\_hash (normalized text plus section path) is for identity, change detection and deduplication. embedding\_input\_hash is a hash of the exact string passed to the embedder (after build\_embedding\_input, before the adapter adds a prefix). The embedding cache is keyed by (embedding\_input\_hash, embedder fingerprint). When embed\_text\_source is normalized, the two hashes carry the same information.
+
+*Reliability and observability rules*
+
+14. Batch 16 to 64 texts, sort by length inside a batch, and restore the original order. Halve the batch on out-of-memory errors, set a timeout per batch, and run one batch at a time in the worker.
+15. Do not expect bit-identical output across hardware. Contract tests use cosine similarity of at least 0.9999 for "same text" and "batch equals single". Fix the thread count.
+16. Metrics (labels limited to model id and operation, documents or query): calls, texts, tokens, latency, batch size, cache hits and truncations. Add an embed span with the same attributes. Cost uses the pricing table from step 2.17.
+17. Load the model lazily behind a lock, run one warm-up embed at startup, log the cold-start time, and have /readyz check that the model is loaded.
+
+*FakeEmbedder.* Make it meaningful, not random: hash word and character trigrams into d dimensions and L2-normalize, so paraphrases really score higher. This lets the step 2.4 retrieval tests assert ordering. It counts calls and texts, and has failing and slow variants. Everything outside the contract tests uses it.
+
+*Query-embedding cache:* wrap the embedder with a Cached wrapper for queries (Redis, with a TTL). The key is a hash of the query text (after the same transform as documents) plus the embedder fingerprint. Never store raw query text as the key. Skip the cache for queries flagged as containing PII.
+
+*Deferred:* a hosted embedder (for example Gemini embeddings) is not part of Week 2. When it is added later it follows the same rules: its own index version, never a fallback, and a data policy that keeps private sources away from it.
+
+**Tests:**
+
+- Contract suite, run on every embedder: dtype, dimension, finiteness and norm; determinism within tolerance; batch equals single with mixed lengths; order preserved; empty text and empty batch handled; a too-long document is rejected; query truncation is flagged; prefixes are applied (spy on the model input); errors map to the core errors (429, timeout, auth, wrong output shape).
+- Fake: paraphrases score higher than unrelated sentences in Arabic, English and across languages; call and text counters are correct.
+- Fingerprint: changing any EmbedderConfig field changes the digest; a fingerprint mismatch between the active index and the loaded embedder makes /readyz fail; no FallbackEmbedder exists (import-linter test).
+- Inputs: build\_embedding\_input is the only place that builds the string; two chunks with the same normalized text but different original text have the same chunk\_hash and, when embed\_text\_source is original, different embedding\_input\_hash values (and the same one when it is normalized); a chunk longer than the limit minus prefix tokens fails at startup validation.
+- Query cache: the second identical query is a hit with no embedder call; a different embedder fingerprint or different text is a miss; entries expire with a fake clock; a PII-flagged query is never cached; hit and miss counters increase.
+
+**2.2b Model bake-off and real adapter (new).** Choose the embedding model with data, then write its adapter.
+
+1. Pick three candidates that handle Arabic, English and cross-language search (for example a multilingual E5 size, BGE-M3, and a recent small multilingual model). Model rankings change often, so check the current MTEB multilingual and Arabic results and each license first.
+2. Run all three on your 30-question dev subset (Arabic, English and cross-language) and record recall@5 and MRR. Use the same chunks and the same runtime for each.
+3. For each model also record: peak memory (RSS), load time, query latency on the target host, disk size, license and dimension.
+4. Gates: the model plus runtime stays under about 250 MB of RSS on the free host (512 MB total), and query embedding fits the latency budget (aim for 300 ms or less, inside the 5 s p95 text target). If the best model fails a gate, decide now: a smaller model, a quantized one, or running query embedding elsewhere.
+5. Production uses fastembed or onnxruntime plus the tokenizers library. Keep torch and sentence-transformers in the dev and evals extras, so the production image stays under its size limit.
+6. Pin the revision. Download the model in a build step or into a volume, never at request time. Verify its sha256 on load, and run CI with the Hugging Face hub in offline mode.
+7. Write an ADR with the numbers and the decision, and a model card in docs/model-cards/ (purpose, version, license, languages, size, latency, eval results and known limits). Record embed\_text\_source in the card after step 2.7.
+8. Write the adapter and run the full contract suite from step 2.2 on it.
+
+**Tests:** the contract suite passes on the real adapter; the sanity tests (marked slow, run locally and nightly) show a paraphrase scoring higher than an unrelated sentence in Arabic, English and across languages, a query scoring higher against its own passage than a distractor, and diacritic and alef variants staying close (cosine of at least 0.9) when the original text is embedded; a loader test rejects a model whose checksum does not match; the resource test (nightly) checks peak RSS and load time against the limits, and the Docker size check still passes.
 
 **2.3 Database.** Write an Alembic migration. Snapshots point to page versions, and chunks belong to page versions, so unchanged pages are never duplicated.
 
@@ -197,12 +249,12 @@ Store each page version with URL, canonical URL, title, language, fetched-at tim
 - page\_versions: id, canonical\_url, content\_hash, cleaner\_version, language, title, fetched\_at, text, status.
 - snapshot\_pages: snapshot\_id, page\_version\_id, state (present or removed).
 - sources: id, type, owner\_id, name, checksum, status, quota counters.
-- chunks: id, page\_version\_id or source\_id, owner\_id, source\_type, section\_path, language, text, normalized\_text, chunk\_hash, pipeline\_fingerprint, a pgvector column, a full-text search column and tombstoned\_at.
-- embedding\_cache: chunk\_hash, embedder fingerprint, vector, so identical chunks are never embedded twice.
+- chunks: id, page\_version\_id or source\_id, owner\_id, source\_type, section\_path, language, text, normalized\_text, chunk\_hash, embedding\_input\_hash, pipeline\_fingerprint, a pgvector column, a full-text search column and tombstoned\_at.
+- embedding\_cache: embedding\_input\_hash, embedder fingerprint, vector, so identical embedding inputs are never embedded twice.
 - jobs: id, type, source\_id, status, reason, started\_at, finished\_at, counters as JSON.
 - index\_versions: id, fingerprint parts as JSON, status, source snapshot, eval\_run\_id, created\_at, activated\_at (step 2.14 uses it; vectors are stored per index version because pgvector needs a fixed dimension per column).
 
-Unique keys: (canonical\_url, content\_hash) on page versions, (page\_version\_id, chunk\_index, pipeline\_fingerprint) on chunks, and (chunk\_hash, embedder fingerprint) on the cache. Add a Postgres advisory-lock helper for single-job execution. Check which text-search configuration your Postgres offers for Arabic. If none fits, use the 'simple' configuration on normalized text, and measure the choice in step 2.7.
+Unique keys: (canonical\_url, content\_hash) on page versions, (page\_version\_id, chunk\_index, pipeline\_fingerprint) on chunks, and (embedding\_input\_hash, embedder fingerprint) on the cache. Add a Postgres advisory-lock helper for single-job execution. Check which text-search configuration your Postgres offers for Arabic. If none fits, use the 'simple' configuration on normalized text, and measure the choice in step 2.7.
 
 **Tests:** an integration test against the CI Postgres: the migration runs up and down, constraints hold, the vector column has the right dimension, a full-text query returns the expected row, and an Arabic query finds an Arabic row after normalization. Inserting the same page version or chunk twice hits the unique key, and the upsert helper handles it cleanly. Two snapshots that share an unchanged page share the same chunk rows (count them).
 
@@ -210,14 +262,14 @@ Unique keys: (canonical\_url, content\_hash) on page versions, (page\_version\_i
 
 1. If its chunks already exist with the current pipeline fingerprint, skip it.
 2. Otherwise re-chunk it and compute the chunk hashes.
-3. For each chunk, look up embedding\_cache by (chunk hash, embedder fingerprint). Embed only the misses.
+3. For each chunk, look up embedding\_cache by (embedding input hash, embedder fingerprint). Embed only the misses.
 4. Upsert the chunks and cache rows in one transaction per page version.
 5. Tombstone the chunks of pages removed in the target snapshot, and chunks left over from older versions of a changed page that no active snapshot references.
 6. Scan each new chunk with the injection patterns from step 2.5b and set its suspicious flag. Flag, never delete.
 
 Run it as a background job (not in the web process), one at a time under the advisory lock, with a stored status and counters: pages skipped, pages processed, chunks created, chunks reused, chunks embedded, chunks tombstoned and chunks flagged suspicious. Later, uploads and user websites use the same ingestion path.
 
-**Tests:** *run it twice:* the second run writes zero rows, makes zero embedder calls (assert on FakeEmbedder) and produces identical chunk ids. Change one page: only that page is reprocessed, and if one sentence changed, only the affected chunks are embedded. Change only boilerplate (header, footer, timestamp): nothing is reprocessed. Change the chunker settings, normalizer version or embedder id: everything is reprocessed, and old-fingerprint chunks are never returned by retrieval. Kill the job mid-run (raise an exception after N pages) and rerun: no duplicates, and the final state equals a clean uninterrupted run. Two jobs started at once: the second waits or exits cleanly because of the lock. A removed page's chunks never appear in retrieval (not just a flag on the page). A failed embed call for one page rolls back that page only, marks it failed with a reason, and the job continues. The counters in the job record match the rows actually written. A chunk containing a known injection phrase gets the suspicious flag and a normal chunk does not (the full pattern tests are in step 2.5b).
+**Tests:** *run it twice:* the second run writes zero rows, makes zero embedder calls (assert on FakeEmbedder) and produces identical chunk ids. Change one page: only that page is reprocessed, and if one sentence changed, only the affected chunks are embedded. Change only boilerplate (header, footer, timestamp): nothing is reprocessed. Change the chunker settings, normalizer version or embedder id: everything is reprocessed, and old-fingerprint chunks are never returned by retrieval. Kill the job mid-run (raise an exception after N pages) and rerun: no duplicates, and the final state equals a clean uninterrupted run. Two jobs started at once: the second waits or exits cleanly because of the lock. A removed page's chunks never appear in retrieval (not just a flag on the page). A failed embed call for one page rolls back that page only, marks it failed with a reason, and the job continues. The counters in the job record match the rows actually written. With embed\_text\_source set to original, two chunks that differ only in diacritics get different cache entries; with normalized they share one. A chunk containing a known injection phrase gets the suspicious flag and a normal chunk does not (the full pattern tests are in step 2.5b).
 
 **2.4 Retrieval.** Combine vector search and keyword search (reciprocal rank fusion), then rerank with a small cross-encoder if your machine allows it. Every query searches the active built-in snapshot (chunks reachable through its page versions, current fingerprint, not tombstoned) plus the caller's own sources and nothing else. Expose each stage separately (vector, keyword, fuse, rerank) so each can be traced and evaluated on its own.
 
@@ -264,6 +316,7 @@ The full input guard for user messages stays in step 3.3, and screening of user-
 - Retrieval: recall@5, MRR and hit rate at k = 1, 3 and 5.
 - Answers: faithfulness, answer relevance, citation accuracy (the cited chunk really supports the claim) and correct-refusal rate on adversarial and unanswerable questions.
 - An ablation table: vector-only, keyword-only, hybrid and hybrid plus rerank, each reported separately and split by language. This table justifies your Arabic keyword-search choice from step 2.3.
+- An embedding-input comparison: original text versus normalized text as the embedded string (embed\_text\_source), per language. Freeze the winner in the embedder model card.
 - A breakdown by question type and by language.
 
 *Reproducibility record:* write every eval report as JSON and Markdown, including the snapshot id, dataset version and checksum, pipeline fingerprint and its parts, k values, prompt ids and hashes, model ids per role, judge model id, git SHA and run time. Plain JSON now; Langfuse experiments (5.7) and the lock file (5.8) build on it later.
@@ -310,7 +363,7 @@ These steps pull the RAG-related LLMOps practices forward from Weeks 5 to 8, so 
 Flow:
 
 1. Change one setting (chunk size, separators, embedder, reranker settings).
-2. python -m copilot.rag.index build --version v2 runs incremental ingestion (step 2.3b) into a new version beside the active one. The embedding cache is keyed by chunk hash and embedder fingerprint, so changing only the chunker reuses every vector for identical chunks.
+2. python -m copilot.rag.index build --version v2 runs incremental ingestion (step 2.3b) into a new version beside the active one. The embedding cache is keyed by embedding input hash and embedder fingerprint, so changing only the chunker reuses every vector for chunks with an identical embedding input.
 3. python -m copilot.rag.index eval --version v2 runs the golden set against v2 and writes the standard report. It also writes a diff of questions whose top-1 result changed between the active version and v2.
 4. A promotion gate: thresholds are met and there is no regression beyond a tolerance against the active version on recall@5, MRR, faithfulness and correct-refusal rate.
 5. python -m copilot.rag.index activate v2 changes one config value. The answer-cache key includes the active index version, so old cached answers stop matching by themselves.

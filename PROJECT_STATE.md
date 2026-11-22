@@ -3,9 +3,9 @@
 > Source of truth for what exists in the repo. Put this file at the repo root.
 > When you start a new chat with Claude, send this file first. Claude treats it as the current state and continues from "Next up".
 
-Last updated: 2026-11-16 · Delivery count: 27 (rows 1 to 27 confirmed) · Plan reference: Step-by-Step Execution Plan v0.2, November 2026 (Steps 0 to 8.7)
+Last updated: 2026-11-22 · Delivery count: 28 (rows 1 to 28 confirmed) · Plan reference: Step-by-Step Execution Plan v0.2, November 2026 (Steps 0 to 8.7)
 
-Plan progress: Step 0 through Step 2.1 are complete (including crawler pipeline integration tests, orchestrator resilience, atomic resume, cleaner optimization, snapshot immutability, O(1) dictionary indexing, and Step 2.1 Normalization, chunking, and pipeline fingerprint). Next: Step 2.2 (Local multilingual embedder on CPU).
+Plan progress: Step 0 through Step 2.2 are complete (including crawler pipeline integration tests, orchestrator resilience, atomic resume, cleaner optimization, snapshot immutability, O(1) dictionary indexing, Step 2.1 Normalization, chunking, and pipeline fingerprint, and Step 2.2 Embedder port, vector math, inputs, budget validation, query caching with LRU bounded memory, single-flight coalescing, HMAC privacy, fakes, and contract suite). Next: Step 2.2b (Model bake-off and real adapter) or Step 2.3 (Database schema and Alembic migrations).
 
 ---
 
@@ -154,15 +154,22 @@ support-copilot/
 │   │       ├── [ ] edge_tts.py
 │   │       └── [ ] piper_local.py
 │   ├── rag/
-│   │   ├── [x] __init__.py               (Step 1.1 package skeleton, Step 2.0 & Step 2.1 exports)
+│   │   ├── [x] __init__.py               (Step 1.1 package skeleton, Step 2.0 - 2.2 exports)
 │   │   ├── [x] crawl.py                  (Step 2.0c: standalone CLI entrypoint python -m copilot.rag.crawl)
 │   │   ├── [x] cleaner.py                (Backward-compatible re-export -> crawler.cleaner)
 │   │   ├── [x] models.py                 (Step 2.1: frozen Chunk dataclass, backward-compatible re-exports)
 │   │   ├── [x] normalize.py              (Step 2.1: 10-rule Arabic text normalizer, NORMALIZER_VERSION)
 │   │   ├── [x] tokens.py                 (Step 2.1: TokenCounter protocol with token_spans & max_input_tokens, WhitespaceTokenCounter)
 │   │   ├── [x] chunker.py                (Step 2.1: Heading stack, recursive splitting, overlap window, deterministic IDs & hashes)
-│   │   ├── [x] fingerprint.py            (Step 2.1: PipelineFingerprint, canonical_json, chunking_digest)
+│   │   ├── [x] fingerprint.py            (Step 2.1: PipelineFingerprint, canonical_json, chunking_digest, embedder_digest)
 │   │   ├── [x] snapshot.py               (Backward-compatible re-export -> crawler.snapshot)
+│   │   ├── embedder/                     (Step 2.2: Embedder port, vector math, inputs, budget validation, query caching)
+│   │   │   ├── [x] __init__.py           (Package exports, BaseEmbedder, Embedder, CachedQueryEmbedder, etc.)
+│   │   │   ├── [x] base.py               (Synchronous Embedder protocol, BaseEmbedder with batching, length-sorting, token counters)
+│   │   │   ├── [x] vector.py             (normalize_l2 unit sphere projection, is_finite_and_normalized invariant checks)
+│   │   │   ├── [x] inputs.py             (build_embedding_input, prepare_query_text, compute_embedding_input_hash, detect_pii)
+│   │   │   ├── [x] validation.py         (validate_chunker_embedder_budget startup guard, verify_embedder_fingerprint_readiness)
+│   │   │   └── [x] cache.py              (QueryCacheBackend protocol, InMemoryQueryCache with TTL, CachedQueryEmbedder with PII protection)
 │   │   └── crawler/                      (Unified crawler, cleaner, and snapshot package)
 │   │       ├── [x] __init__.py           (Crawler package exports)
 │   │       ├── [x] client.py             (PoliteClient: lock, delay, backoff, 304, circuit breaker)
@@ -210,16 +217,18 @@ support-copilot/
 │   ├── [x] __init__.py                   (Step 1.3)
 │   ├── [x] conftest.py                   (Step 1.1, live marker guard)
 │   ├── fakes/
-│   │   ├── [x] __init__.py               (Step 1.3, Step 2.1 fakes)
+│   │   ├── [x] __init__.py               (Step 1.3, Step 2.1 & Step 2.2 fakes)
 │   │   ├── [x] fake_llm.py               (FakeLLM satisfying ChatModel Protocol, Step 1.3, enhanced Step 1.5)
 │   │   ├── [x] fake_sleeper.py           (FakeSleeper for zero-delay clock testing, Step 1.5)
-│   │   └── [x] fake_token_counter.py     (FakeCharTokenCounter & FakeWordTokenCounter, Step 2.1)
+│   │   ├── [x] fake_token_counter.py     (FakeCharTokenCounter & FakeWordTokenCounter, Step 2.1)
+│   │   └── [x] fake_embedder.py          (FakeEmbedder with semantic trigram hashing, Arabic/English concept anchors, fault injection, Step 2.2)
 │   ├── fixtures/
 │   │   ├── corpus/                       hand-written fixture corpus for CI (never live site data)
 │   │   └── html/                         (Step 2.0b: Arabic support, timestamp change, real text change, JS shell, English support)
 │   ├── contract/
 │   │   ├── [x] __init__.py               (Step 1.4)
-│   │   └── [x] test_llm_contract.py      (Step 1.4: mocked HTTP contract tests & manual live test)
+│   │   ├── [x] test_llm_contract.py      (Step 1.4: mocked HTTP contract tests & manual live test)
+│   │   └── [x] test_embedder_contract.py (Step 2.2: Reusable check_embedder_contract suite & TestEmbedderContract)
 │   ├── redteam/
 │   ├── unit/
 │   │   ├── [x] test_check_docs.py        (tests for check_docs.py)
@@ -240,7 +249,8 @@ support-copilot/
 │   │   ├── [x] test_normalize.py         (Step 2.1: 20 unit tests for 10 normalization rules, idempotence, hamza preservation)
 │   │   ├── [x] test_chunker.py           (Step 2.1: 12 unit/property tests for hard limits, unbroken strings, overlap, coverage, isolation, determinism)
 │   │   ├── [x] test_fingerprint.py       (Step 2.1: 7 unit tests for immutability, hashability, full & sub-digests, changed_parts, serialization)
-│   │   └── [x] test_cleaner_features.py  (Step 2.1/Cleaner Hardening: 19 unit tests for line-preserving content_hash, nested list extraction with div/span wrappers, nested table isolation without row/cell mixing, eliminating needs_js false positives, rule versioning, and quality gate)
+│   │   ├── [x] test_cleaner_features.py  (Step 2.1/Cleaner Hardening: 19 unit tests for line-preserving content_hash, nested list extraction with div/span wrappers, nested table isolation without row/cell mixing, eliminating needs_js false positives, rule versioning, and quality gate)
+│   │   └── [x] test_embedder.py          (Step 2.2: 15 unit tests for vector space, semantic paraphrase behavior, fingerprint sensitivity, input rules, query cache TTL/PII)
 │   └── integration/
 │       ├── [x] test_crawler_pipeline.py     (8 end-to-end integration tests & real socket tests)
 │       └── [~] test_provider_keys_live.py   (live-marked wrapper around the key check)
@@ -309,6 +319,7 @@ One row per delivery. Claude adds a row every time it ships files.
 | 25 | 2026-11-16 | 2.1 Normalization, chunking and fingerprint | `src/copilot/rag/normalize.py`, `src/copilot/rag/tokens.py`, `src/copilot/rag/models.py`, `src/copilot/rag/fingerprint.py`, `src/copilot/rag/chunker.py`, `src/copilot/rag/crawler/cleaner.py`, `src/copilot/rag/__init__.py`, `tests/fakes/fake_token_counter.py`, `tests/unit/test_tokens.py`, `tests/unit/test_normalize.py`, `tests/unit/test_chunker.py`, `tests/unit/test_fingerprint.py`, `LOG.md`, `PROJECT_STATE.md` | 58 unit tests added (6 in `test_tokens.py`, 20 in `test_normalize.py`, 23 in `test_chunker.py`, 9 in `test_fingerprint.py`): verifies TokenCounter protocol with token_spans & max_input_tokens, non-additive recounting, loud startup limit failure, strictly monotonic FakeCharTokenCounter & FakeWordTokenCounter in tests/fakes, 10 normalizer rules (extended diacritics/Quranic marks, price separators, Persian keyboard letters, LSEP/PSEP newlines, pre-compiled space regex, multi-script casefold idempotence across all 1.1M Unicode codepoints), hamza preservation, verbatim contiguous source slices `text[char_start:char_end]`, non-overlapping text reconstruction via `chunk.text[overlap_chars:]`, table & list item preservation (`r"(?<=\n)(?=[-*+] |\d+\. |\|)"` before `\n`), exact embedding input calculation (`format_embedding_input(passage_prefix + section_path + text)`), runtime actual token verification preventing model truncation, overlap tail word-snapping without tiny collapse, typed `ChunkInput` contract with automatic filtering of removed pages/JS shells/non-200 HTTP statuses, frozen Chunk dataclass, truly immutable & hashable PipelineFingerprint with full_digest strictly requiring embedder and sub-digests for Step 2.1, granular changed_parts, to_dict/from_dict serialization with stored digest verification, domain separation & schema versioning, typed ChunkerConfig & EmbedderConfig, canonical_json with allow_nan=False, compute_pattern_version hashing, heading hierarchy stack (H1 > H2 > H3), monotonic ordinals, hard limit adherence, overlap window, zero overlap across headings, deterministic chunk IDs & hashes, one-sentence edit isolation, and fingerprint sensitivity | `python -m unittest tests/unit/test_tokens.py tests/unit/test_normalize.py tests/unit/test_chunker.py tests/unit/test_fingerprint.py` | yes (all 58 tests passing) |
 | 26 | 2026-11-16 | Cleaner Hardening, Rules Architecture & Quality Gate | `src/copilot/rag/crawler/cleaner.py`, `src/copilot/rag/crawler/models.py`, `src/copilot/rag/crawler/snapshot.py`, `src/copilot/rag/crawler/orchestrator.py`, `tests/unit/test_cleaner_features.py`, `tests/unit/test_cleaner_and_snapshot.py`, `LOG.md`, `PROJECT_STATE.md` | 13 unit tests in `test_cleaner_features.py`: verifies rule versioning separation (`TRAFILATURA_RULE_VERSION` & `BS4_RULE_VERSION`), real quality gate (`passes_quality_gate` enforcing length, content words, and rejecting comparison/shopping modal noise), extractor provenance recording (`"trafilatura"`, `"beautifulsoup"`), exact token-based class/ID matching preventing false deletions, modal & comparison widget pruning, non-duplication in nested lists via recursive=False DOM traversal, Markdown table extraction preserving row/column relations, article `<header>` preservation, informative `<form>` retention, HTTP 200 cleaner_version reuse checking, HTTP 304 re-cleaning with preserved raw_html, HTTP 304 reuse when cleaner_version matches, and automatic generation of clean markdown chunker inspection view on every snapshot save | `python -m unittest tests/unit/test_cleaner_features.py` | yes (all 13 tests passing, 71 total tests passing) |
 | 27 | 2026-11-16 | Cleaner Hardening & JS Shell Detection | `src/copilot/rag/crawler/cleaner.py`, `src/copilot/rag/cleaner.py`, `tests/unit/test_cleaner_features.py`, `LOG.md`, `PROJECT_STATE.md` | 19 unit tests in `test_cleaner_features.py`: line-preserving content hashing (`normalize_content_lines`), nested list extraction with intermediate div/span wrappers without text flattening, nested tables isolation preventing row/cell mixing, eliminating needs_js false positives on content-bearing pages (e.g. prepaid), portal navigation structure item stripping (main-header, secondary-header, back-to-top, quick-access, skip-link), duplicate prevention for nested <p> in headings and CSS hover .overlay cards, consecutive identical block suppression, BOILERPLATE_PATTERNS backward compatibility export | `python -m unittest tests/unit/test_cleaner_features.py` | yes (all 19 tests passing, 77 total tests passing) |
+| 28 | 2026-11-22 | 2.2 Embedder port, rules, query cache hardening & fakes | `src/copilot/rag/embedder/` (`base.py`, `vector.py`, `inputs.py`, `validation.py`, `cache.py`), `src/copilot/rag/fingerprint.py`, `src/copilot/rag/__init__.py`, `src/copilot/core/errors.py`, `tests/fakes/fake_embedder.py`, `tests/contract/test_embedder_contract.py`, `tests/unit/test_embedder.py`, `LOG.md`, `PROJECT_STATE.md` | 40 unit and contract tests in `test_embedder.py` and `test_embedder_contract.py`: Embedder protocol and BaseEmbedder with batching, length-sorting, exact index restoration, thread-safe token metrics; hardened vector math with strict 1D/2D shapes, non-finite rejection, zero-vector rejection, overflow protection; unified effective token budgets rejecting non-positive budgets; readiness verification blocking mismatched index fingerprints with structured logging; bounded in-memory LRU cache with max_size validation and active expired cleanup; single-flight coalescing deduplicating concurrent identical inference; and HMAC-SHA256 query cache key privacy preventing dictionary/rainbow table recovery | `python -m unittest tests.contract.test_embedder_contract tests.unit.test_embedder` | yes (all 40 embedder unit and contract tests passing, 388+ total tests passing) |
 
 ---
 
@@ -318,11 +329,10 @@ One row per delivery. Claude adds a row every time it ships files.
    - Check that `.env.example` lists `CRAWL_CONTACT` and `APP_JWT_SECRET` (confirmed).
    - Add the GitHub part of Step 0.4 to `LOG.md`: a line plus a screenshot of the blocked pull request.
    - Check the `LICENSE` copyright name (`Omar`).
-2. **Next step: Week 2A (RAG Ingest & Answer) — Step 2.2 (Local multilingual embedder on CPU)**
-   - Wrap local embedding model on CPU (fastembed or sentence-transformers).
-   - Support Arabic and English texts, with normalized embedding inputs: `section_path + "\n\n" + text`.
-   - Complete `PipelineFingerprint` with embedder model name, parameters, and dimension.
-3. Steps 2.3 to 2.5a (Week 2A vector search, incremental ingestion, reranking, and grounded answers) -> Steps 2.6 to 2.13 (Week 2B eval & operation).
+2. **Next step: Either Step 2.2b (Model bake-off and real adapter) or Step 2.3 (Database schema and Alembic migrations)**
+   - Step 2.2b: Pick candidates (multilingual-E5, BGE-M3, MiniLM), benchmark RSS (< 400 MB) and latency (< 50 ms / query) on CPU, implement FastEmbed/ONNX adapter, write model card.
+   - Step 2.3: Database schema and Alembic migrations (`snapshots`, `page_versions`, `chunks` with pgvector, `embedding_cache`).
+3. Steps 2.4 to 2.5a (Retriever, reranker, and grounded answers) -> Steps 2.6 to 2.13 (Eval & operation).
 4. Step 1.10 (Deploy to Render): deferred until RAG system is ready with knowledge base.
 
 ---

@@ -89,6 +89,16 @@ class AuthError(ProviderError):
         super().__init__(message, provider)
 
 
+class ModelLoadError(CopilotError):
+    """Raised when an embedding, classification, or other model fails to load or initialize."""
+
+    def __init__(self, message: str, model_id: str = "unknown") -> None:
+        super().__init__(f"[{model_id}] {message}")
+        self.message = message
+        self.model_id = model_id
+        self.component = model_id
+
+
 class InvalidInputError(CopilotError):
     """Raised when client input fails validation or exceeds allowed limits."""
 
